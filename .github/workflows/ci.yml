@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.26.x", "stable"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - name: vet
+        run: go vet ./...
+      - name: lint
+        if: matrix.go == 'stable'
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+          golangci-lint run ./...
+      - name: test
+        run: go test -race -count=1 ./...
+      - name: sqlite version
+        run: go test -count=1 -v -run TestSQLiteVersion .
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  postgres:
+    name: postgres ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [14, 15, 16, 17]
+    services:
+      postgres:
+        image: postgres:${{ matrix.version }}
+        env:
+          POSTGRES_USER: dbadminer
+          POSTGRES_PASSWORD: dbadminer
+          POSTGRES_DB: dbadminer
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dbadminer -d dbadminer"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: handlers via DATABASE_URL
+        env:
+          DBADMINER_INTEGRATION: "1"
+          DATABASE_URL: postgres://dbadminer:dbadminer@127.0.0.1:5432/dbadminer?sslmode=disable
+        run: go test -tags integration -count=1 -timeout 20m ./...
+      - name: handlers via libpq variables
+        env:
+          DBADMINER_INTEGRATION: "1"
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGUSER: dbadminer
+          PGPASSWORD: dbadminer
+          PGDATABASE: dbadminer
+          PGSSLMODE: disable
+        run: go test -tags integration -count=1 -timeout 20m ./...
+
+  mysql:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mysql 8
+            image: mysql:8
+          - name: mariadb 10
+            image: mariadb:10
+          - name: mariadb 11
+            image: mariadb:11
+    services:
+      mysql:
+        image: ${{ matrix.image }}
+        env:
+          MYSQL_USER: dbadminer
+          MYSQL_PASSWORD: dbadminer
+          MYSQL_DATABASE: dbadminer
+          MYSQL_ROOT_PASSWORD: root
+          MARIADB_USER: dbadminer
+          MARIADB_PASSWORD: dbadminer
+          MARIADB_DATABASE: dbadminer
+          MARIADB_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: handlers via DATABASE_URL
+        env:
+          DBADMINER_INTEGRATION: "1"
+          DATABASE_URL: mysql://dbadminer:dbadminer@127.0.0.1:3306/dbadminer
+        run: go test -tags integration -count=1 -timeout 20m ./...
+      - name: handlers via MYSQL variables
+        env:
+          DBADMINER_INTEGRATION: "1"
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: "3306"
+          MYSQL_USER: dbadminer
+          MYSQL_PASSWORD: dbadminer
+          MYSQL_DATABASE: dbadminer
+        run: go test -tags integration -count=1 -timeout 20m ./...
