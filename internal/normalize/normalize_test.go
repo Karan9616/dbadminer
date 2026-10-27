@@ -1,4 +1,4 @@
-package dbadminer
+package normalize
 
 import (
 	"encoding/base64"

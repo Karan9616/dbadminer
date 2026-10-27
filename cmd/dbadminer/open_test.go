@@ -1,4 +1,4 @@
-package dbopen
+package main
 
 import (
 	"context"

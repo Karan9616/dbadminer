@@ -4,6 +4,26 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  - package-ecosystem: gomod
+    directory: /tools
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /cmd/dbadminer
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /examples/http
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /examples/chi
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /examples/cobra
+    schedule:
+      interval: weekly
   - package-ecosystem: github-actions
     directory: /
     schedule:

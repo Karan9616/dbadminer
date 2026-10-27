@@ -1,8 +1,4 @@
-// Package dbopen connects to PostgreSQL, MySQL, or SQLite from the environment
-// variables already used by most applications, then serves DBAdminer.
-// Importing this package pulls in database drivers. Programs that already
-// hold a *sql.DB can import github.com/dbadminer/dbadminer instead.
-package dbopen
+package main
 
 import (
 	"context"
@@ -35,8 +31,13 @@ func Run(ctx context.Context, args []string) error {
 	cfg := dbadminer.DefaultConfig()
 	fs := dbadminer.Flags(&cfg)
 	dsn := fs.String("dsn", "", "database URL or DSN; overrides DATABASE_URL and related variables")
+	version := fs.Bool("version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *version {
+		fmt.Println(dbadminer.Version)
+		return nil
 	}
 	if err := dbadminer.ApplyAccess(&cfg, fs, os.Getenv("DBADMINER_ACCESS")); err != nil {
 		return err
@@ -54,7 +55,7 @@ func Run(ctx context.Context, args []string) error {
 }
 
 func open(ctx context.Context, getenv func(string) string, dsn string, readOnly bool) (*sql.DB, error) {
-	conn, err := dbadminer.ResolveConn(getenv, dsn, readOnly)
+	conn, err := ResolveConn(getenv, dsn, readOnly)
 	if err != nil {
 		return nil, err
 	}

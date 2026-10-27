@@ -20,21 +20,62 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+            cmd/dbadminer/go.sum
+            examples/http/go.sum
+            examples/chi/go.sum
+            examples/cobra/go.sum
       - name: vet
-        run: go vet ./...
+        run: |
+          go vet ./...
+          go -C cmd/dbadminer vet ./...
+          go -C examples/http vet ./...
+          go -C examples/chi vet ./...
+          go -C examples/cobra vet ./...
+      - name: fmt
+        if: matrix.go == 'stable'
+        run: |
+          files=$(gofmt -l .)
+          if [ -n "$files" ]; then
+            printf '%s\n' "$files"
+            exit 1
+          fi
+      - name: tidy
+        if: matrix.go == 'stable'
+        run: |
+          go mod tidy
+          (cd tools && go mod tidy)
+          (cd cmd/dbadminer && go mod tidy)
+          (cd examples/http && go mod tidy)
+          (cd examples/chi && go mod tidy)
+          (cd examples/cobra && go mod tidy)
+          git diff --exit-code -- go.mod go.sum tools/go.mod tools/go.sum cmd/dbadminer/go.mod cmd/dbadminer/go.sum examples/http/go.mod examples/http/go.sum examples/chi/go.mod examples/chi/go.sum examples/cobra/go.mod examples/cobra/go.sum
       - name: lint
         if: matrix.go == 'stable'
         run: |
-          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
-          golangci-lint run ./...
+          root=$PWD
+          go tool -modfile=tools/go.mod golangci-lint run ./...
+          for dir in cmd/dbadminer examples/http examples/chi examples/cobra; do
+            (cd "$dir" && go tool -modfile="$root/tools/go.mod" golangci-lint run ./...)
+          done
       - name: test
-        run: go test -race -count=1 ./...
+        run: |
+          go test -race -count=1 ./...
+          go -C cmd/dbadminer test -race -count=1 ./...
+          go -C examples/http test -count=1 ./...
+          go -C examples/chi test -count=1 ./...
+          go -C examples/cobra test -count=1 ./...
       - name: sqlite version
         run: go test -count=1 -v -run TestSQLiteVersion .
       - name: govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          root=$PWD
+          go tool -modfile=tools/go.mod govulncheck ./...
+          for dir in cmd/dbadminer examples/http examples/chi examples/cobra; do
+            go -C "$dir" tool -modfile="$root/tools/go.mod" govulncheck ./...
+          done
 
   postgres:
     name: postgres ${{ matrix.version }}
@@ -62,11 +103,18 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+            cmd/dbadminer/go.sum
+            examples/http/go.sum
+            examples/chi/go.sum
+            examples/cobra/go.sum
       - name: handlers via DATABASE_URL
         env:
           DBADMINER_INTEGRATION: "1"
           DATABASE_URL: postgres://dbadminer:dbadminer@127.0.0.1:5432/dbadminer?sslmode=disable
-        run: go test -tags integration -count=1 -timeout 20m ./...
+        run: go -C cmd/dbadminer test -tags integration -count=1 -timeout 20m ./...
       - name: handlers via libpq variables
         env:
           DBADMINER_INTEGRATION: "1"
@@ -76,7 +124,7 @@ jobs:
           PGPASSWORD: dbadminer
           PGDATABASE: dbadminer
           PGSSLMODE: disable
-        run: go test -tags integration -count=1 -timeout 20m ./...
+        run: go -C cmd/dbadminer test -tags integration -count=1 -timeout 20m ./...
 
   mysql:
     name: ${{ matrix.name }}
@@ -115,11 +163,18 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+            cmd/dbadminer/go.sum
+            examples/http/go.sum
+            examples/chi/go.sum
+            examples/cobra/go.sum
       - name: handlers via DATABASE_URL
         env:
           DBADMINER_INTEGRATION: "1"
           DATABASE_URL: mysql://dbadminer:dbadminer@127.0.0.1:3306/dbadminer
-        run: go test -tags integration -count=1 -timeout 20m ./...
+        run: go -C cmd/dbadminer test -tags integration -count=1 -timeout 20m ./...
       - name: handlers via MYSQL variables
         env:
           DBADMINER_INTEGRATION: "1"
@@ -128,4 +183,4 @@ jobs:
           MYSQL_USER: dbadminer
           MYSQL_PASSWORD: dbadminer
           MYSQL_DATABASE: dbadminer
-        run: go test -tags integration -count=1 -timeout 20m ./...
+        run: go -C cmd/dbadminer test -tags integration -count=1 -timeout 20m ./...

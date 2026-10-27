@@ -1,4 +1,5 @@
-package dbadminer
+// Package auth is HTTP basic auth for the explorer.
+package auth
 
 import (
 	"crypto/sha256"
@@ -14,15 +15,17 @@ const (
 	authFailWindow = time.Minute
 )
 
-type authenticator struct {
+// Authenticator checks HTTP basic auth when a user or password is set.
+type Authenticator struct {
 	enabled bool
 	user    string
 	pass    string
 	limiter *attemptLimiter
 }
 
-func newAuthenticator(user, pass string) *authenticator {
-	return &authenticator{
+// New returns an authenticator. Empty user and password disables the check.
+func New(user, pass string) *Authenticator {
+	return &Authenticator{
 		enabled: user != "" || pass != "",
 		user:    user,
 		pass:    pass,
@@ -36,7 +39,11 @@ func constTimeEqual(got, want string) bool {
 	return subtle.ConstantTimeCompare(sumGot[:], sumWant[:]) == 1
 }
 
-func (a *authenticator) wrap(next http.Handler) http.Handler {
+// SetFailLimit sets how many failures are allowed before a client is blocked.
+func (a *Authenticator) SetFailLimit(n int) { a.limiter.limit = n }
+
+// Wrap requires basic auth before next when authentication is enabled.
+func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 	if !a.enabled {
 		return next
 	}

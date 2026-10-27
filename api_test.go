@@ -468,7 +468,7 @@ func TestAuthAndLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ex.auth.limiter.limit = 2
+	ex.auth.SetFailLimit(2)
 	h := ex.Handler()
 
 	unauth := doRequest(h, http.MethodGet, "/api/info", nil, "")
@@ -635,7 +635,7 @@ func TestAccessConfig(t *testing.T) {
 func TestListenAndServe(t *testing.T) {
 	db := openMem(t)
 	cfg := DefaultConfig()
-	cfg.Addr = "0.0.0.0:8080"
+	cfg.Addr = "192.0.2.1:8080"
 	ex, err := New(db, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -687,9 +687,22 @@ func TestListenAndServe(t *testing.T) {
 	}
 }
 
+func TestListenAddr(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:8080", "localhost:8080", "0.0.0.0:8080", "[::]:8080", "[::1]:8080"} {
+		if err := requireLoopbackAddr(addr); err != nil {
+			t.Errorf("%s: %v", addr, err)
+		}
+	}
+	for _, addr := range []string{"192.0.2.1:8080", "example.com:8080", ":8080", "0.0.0.0"} {
+		if err := requireLoopbackAddr(addr); err == nil {
+			t.Errorf("%s was accepted", addr)
+		}
+	}
+}
+
 func TestRunRejectsPublicAddr(t *testing.T) {
 	db := openMem(t)
-	err := Run(context.Background(), db, []string{"--addr", "0.0.0.0:80"})
+	err := Run(context.Background(), db, []string{"--addr", "192.0.2.1:80"})
 	if err == nil {
 		t.Fatal("expected error")
 	}

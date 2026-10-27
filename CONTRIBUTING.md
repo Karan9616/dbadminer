@@ -1,21 +1,20 @@
 # Contributing
 
-Run the unit tests before opening a pull request:
+Run the checks before opening a pull request:
 
 ```bash
-go test ./...
-go vet ./...
+make check
 ```
 
-Integration tests need a database and `DBADMINER_INTEGRATION=1`. `compose.yaml` starts PostgreSQL 16, MySQL 8, and MariaDB 11:
+`make check` formats the tree, runs `go vet`, `golangci-lint`, the race detector, and `govulncheck`. Those tools are pinned in `tools/go.mod`.
+
+Integration tests need a database. `compose.yaml` starts PostgreSQL 16, MySQL 8, and MariaDB 11:
 
 ```bash
 docker compose up -d
-DBADMINER_INTEGRATION=1 \
-  DATABASE_URL='postgres://dbadminer:dbadminer@127.0.0.1:5432/dbadminer?sslmode=disable' \
-  go test -tags integration ./...
+make integration
 ```
 
-Use the same flag with a `mysql://` URL for MySQL or MariaDB. The integration test creates `dbadminer_*` tables and drops them when it finishes.
+`make integration` sets `DBADMINER_INTEGRATION=1` and points `DATABASE_URL` at the Compose Postgres service. Override `DATABASE_URL` with a `mysql://` URL for MySQL or MariaDB. The integration test creates `dbadminer_*` tables and drops them when it finishes.
 
-Format Go files with `gofmt`. The root package must stay free of database drivers; drivers belong in `dbopen`.
+Format Go files with `gofmt`. The library module must stay free of database drivers. Drivers belong in `cmd/dbadminer`, which has its own `go.mod`. Helpers that are not part of the public API belong in `internal/`.

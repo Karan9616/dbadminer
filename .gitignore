@@ -1,5 +1,14 @@
 /bin/
 /dist/
 *.exe
+*.exe~
+*.dll
+*.so
+*.dylib
 *.test
+*.out
 coverage.out
+vendor/
+go.work
+go.work.sum
+dbadminer.db

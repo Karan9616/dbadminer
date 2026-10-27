@@ -1,29 +1,24 @@
 # DBAdminer
 
-DBAdminer is a read-only database explorer for Go. Embed it next to a `*sql.DB` you already have, or start it when `DATABASE_URL` (or the usual Postgres and MySQL variables) is already set.
+DBAdminer is a read-only database explorer for Go. Download a binary and open the UI, embed it next to a `*sql.DB` you already have, or pull the Docker image. The library module imports only the standard library. `cmd/dbadminer` is its own module, so importing the library does not pull in database drivers. Handler tests use SQLite. The module requires Go 1.26 or newer.
 
-The root module imports only the standard library. Import `github.com/dbadminer/dbadminer/dbopen` when DBAdminer should open the database itself. That package pulls in PostgreSQL, MySQL, and SQLite drivers. The module requires Go 1.26 or newer, which is the minimum those drivers support.
+## Download a binary
 
-## Run from existing variables
+GitHub Releases publishes `dbadminer` for Linux, macOS, and Windows on amd64 and arm64. Download the archive for your system, unpack it, and run:
 
-```go
-package main
-
-import (
-	"context"
-	"log"
-
-	"github.com/dbadminer/dbadminer/dbopen"
-)
-
-func main() {
-	if err := dbopen.Run(context.Background(), nil); err != nil {
-		log.Fatal(err)
-	}
-}
+```bash
+dbadminer --dsn 'postgres://user:pass@127.0.0.1:5432/app?sslmode=disable'
 ```
 
-`dbopen.Open` and `dbopen.Run` use the first match:
+Or leave `--dsn` empty and export `DATABASE_URL` (or one of the variables below). Then open `http://127.0.0.1:8080`. The binary listens on `127.0.0.1:8080`. `dbadminer --version` prints the release version.
+
+From a checkout of this repository:
+
+```bash
+go run ./cmd/dbadminer
+```
+
+The command uses the first match:
 
 1. `--dsn`
 2. `DATABASE_URL`, otherwise `DATABASE_PRIVATE_URL`
@@ -36,7 +31,9 @@ func main() {
 
 SQLite opens with `mode=ro` while the explorer is read-only. A missing host or port becomes `localhost` and `5432` or `3306`.
 
-## Embed an existing pool
+## Use it as a library
+
+Import `github.com/dbadminer/dbadminer` and pass the pool you already have. That import does not add database drivers to your module.
 
 ```go
 cfg := dbadminer.DefaultConfig()
@@ -56,11 +53,25 @@ cfg := dbadminer.DefaultConfig()
 cfg.Access = dbadminer.AccessFull // or dbadminer.AccessReadOnly
 ```
 
-Setting `ReadOnly` to false on that configured value still selects full access. `ListenAndServe` refuses any address that is not loopback.
+Setting `ReadOnly` to false on that configured value still selects full access. `ListenAndServe` accepts a loopback address, `0.0.0.0`, or `::`. A specific public address is refused.
 
 Mount `ex.Handler()` on your own server if you want. Requests whose `Host` header is not loopback are rejected, and a present `Origin` must match that host.
 
-Flags accepted by `Flags` and `Run`: `--addr`, `--access`, `--readonly`, `--user`, `--password`, `--max-rows`, `--query-timeout`, `--max-body`, `--max-response`. `--access` is `readonly` or `full`. `--readonly=false` selects full access as well. Set only one of those two flags. `dbopen.Run` also accepts `--dsn`, and `DBADMINER_ACCESS=readonly` or `DBADMINER_ACCESS=full` when neither flag is present. `--user` and `--password` are basic auth for the page. They are never taken from the database password.
+Flags accepted by `Flags` and `Run`: `--addr`, `--access`, `--readonly`, `--user`, `--password`, `--max-rows`, `--query-timeout`, `--max-body`, `--max-response`. `--access` is `readonly` or `full`. `--readonly=false` selects full access as well. Set only one of those two flags. `cmd/dbadminer` also accepts `--dsn`, and `DBADMINER_ACCESS=readonly` or `DBADMINER_ACCESS=full` when neither flag is present. `--user` and `--password` are basic auth for the page. They are never taken from the database password.
+
+`examples/http`, `examples/chi`, and `examples/cobra` show how to mount the handler.
+
+## Run the Docker image
+
+The image listens on `0.0.0.0:8080` inside the container. Publish that port only on the host loopback, then open `http://127.0.0.1:8080`:
+
+```bash
+docker run --rm -p 127.0.0.1:8080:8080 \
+  -e DATABASE_URL='postgres://user:pass@host.docker.internal:5432/app?sslmode=disable' \
+  docker.io/<dockerhub-user>/dbadminer
+```
+
+The same tag workflow that publishes GitHub Release archives also pushes `:<version>` and `:latest` for `linux/amd64` and `linux/arm64`. The image name is `docker.io/${DOCKERHUB_USERNAME}/dbadminer`.
 
 ## HTTP API
 
@@ -79,7 +90,7 @@ Read-only mode is best effort. Use a database user that only has `SELECT`, and o
 ## Tests
 
 ```bash
-go test ./...
+make check
 ```
 
-`compose.yaml` starts PostgreSQL 16, MySQL 8, and MariaDB 11 for the integration tag. See [CONTRIBUTING.md](CONTRIBUTING.md).
+`make check` formats, vets, lints, and tests the module. `compose.yaml` starts PostgreSQL 16, MySQL 8, and MariaDB 11 for the integration tag. `make integration` runs those tests. See [CONTRIBUTING.md](CONTRIBUTING.md).

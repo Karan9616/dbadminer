@@ -1,4 +1,5 @@
-package dbadminer
+// Package guard checks SQL text and request hosts for the explorer.
+package guard
 
 import (
 	"errors"
@@ -8,9 +9,13 @@ import (
 	"strings"
 )
 
+const maxQueryChars = 100_000
+
 var (
-	errEmptySQL = errors.New("dbadminer: empty query")
-	errMultiSQL = errors.New("dbadminer: multiple statements are not allowed")
+	// ErrEmpty is returned for a blank statement.
+	ErrEmpty = errors.New("dbadminer: empty query")
+	// ErrMulti is returned when more than one statement is present.
+	ErrMulti = errors.New("dbadminer: multiple statements are not allowed")
 )
 
 // writeKeywords are rejected anywhere they appear as their own word while the
@@ -66,10 +71,10 @@ func validateStatement(sql string) error {
 	}
 	n := countStatements(stripped)
 	if n == 0 {
-		return errEmptySQL
+		return ErrEmpty
 	}
 	if n > 1 {
-		return errMultiSQL
+		return ErrMulti
 	}
 	return nil
 }
@@ -87,7 +92,7 @@ func ensureReadOnlyKeywords(sql string) error {
 		}
 	}
 	if len(words) == 0 {
-		return errEmptySQL
+		return ErrEmpty
 	}
 	first := words[0]
 	switch first {
@@ -390,4 +395,21 @@ func splitHostPortLoose(addr string) (string, string, error) {
 		return "", "", err
 	}
 	return strings.Trim(host, "[]"), port, nil
+}
+
+// ReadOnlySQL reports whether sql is a single read-only statement.
+func ReadOnlySQL(sql string) (bool, error) { return isReadOnlySQL(sql) }
+
+// Validate reports whether sql is a single statement.
+func Validate(sql string) error { return validateStatement(sql) }
+
+// ReturnsRows reports whether sql produces a row set.
+func ReturnsRows(sql string) bool { return returnsRows(sql) }
+
+// Loopback reports whether addr is a loopback host.
+func Loopback(addr string) bool { return isLoopbackAddr(addr) }
+
+// CheckRequestHost rejects a request whose Host or Origin is not loopback.
+func CheckRequestHost(hostHeader, origin string) error {
+	return checkRequestHost(hostHeader, origin)
 }

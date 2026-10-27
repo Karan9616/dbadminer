@@ -1,4 +1,4 @@
-package dbadminer
+package main
 
 import (
 	"net/url"

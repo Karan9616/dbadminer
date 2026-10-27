@@ -6,7 +6,7 @@ import (
 )
 
 // Exercise runs the shared handler checks. Integration tests live in the
-// external test package so they can import dbopen without a cycle.
+// cmd/dbadminer module so they can open a database without a driver import here.
 func Exercise(t *testing.T, db *sql.DB) {
 	t.Helper()
 	exercise(t, db)

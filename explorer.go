@@ -1,12 +1,12 @@
 // Package dbadminer serves a read-only database explorer over HTTP.
-// The root package imports only the standard library. Callers that want
-// DBAdminer to open a database from the usual environment variables should
-// use package dbopen.
+// The root package imports only the standard library. The cmd/dbadminer
+// module opens a database from the usual environment variables.
 package dbadminer
 
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,7 +14,13 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/dbadminer/dbadminer/internal/auth"
+	"github.com/dbadminer/dbadminer/internal/guard"
 )
+
+//go:embed all:ui
+var uiFiles embed.FS
 
 // Version is reported by GET /api/info.
 var Version = "0.0.0-dev"
@@ -28,7 +34,6 @@ const (
 	defaultMaxBodyBytes    = 1 << 20
 	defaultMaxResponseSize = 8 << 20
 	maxOffset              = 1_000_000
-	maxQueryChars          = 100_000
 	maxColumns             = 512
 
 	// AccessReadOnly rejects statements that change data.
@@ -142,7 +147,7 @@ type Explorer struct {
 	db      *sql.DB
 	cfg     Config
 	dialect Dialect
-	auth    *authenticator
+	auth    *auth.Authenticator
 }
 
 // New detects the database dialect, unless cfg.Dialect is set, and returns an
@@ -172,14 +177,15 @@ func New(db *sql.DB, cfg Config) (*Explorer, error) {
 		db:      db,
 		cfg:     cfg,
 		dialect: d,
-		auth:    newAuthenticator(cfg.User, cfg.Password),
+		auth:    auth.New(cfg.User, cfg.Password),
 	}, nil
 }
 
 // Flags registers explorer settings on a new flag set. cfg must be non-nil.
 // A zero Config is replaced with DefaultConfig, so access defaults to read-only.
 // Pass --access=readonly or --access=full. --readonly=false is the same as
-// --access=full. The set does not include a database DSN; see dbopen.Run for --dsn.
+// --access=full. The set does not include a database DSN; the cmd/dbadminer
+// program accepts --dsn.
 func Flags(cfg *Config) *flag.FlagSet {
 	if cfg == nil {
 		panic("dbadminer: Flags cfg is nil")
@@ -198,7 +204,7 @@ func Flags(cfg *Config) *flag.FlagSet {
 		}
 	}
 	fs := flag.NewFlagSet("dbadminer", flag.ContinueOnError)
-	fs.StringVar(&cfg.Addr, "addr", cfg.Addr, "loopback listen address")
+	fs.StringVar(&cfg.Addr, "addr", cfg.Addr, "listen address: loopback, 0.0.0.0, or ::")
 	fs.StringVar(&cfg.Access, "access", accessDefault, `access mode: "readonly" or "full"`)
 	fs.BoolVar(&cfg.ReadOnly, "readonly", accessDefault != AccessFull, "read-only access; false selects full access")
 	fs.StringVar(&cfg.User, "user", cfg.User, "basic auth user for the explorer")
@@ -298,7 +304,8 @@ func Run(ctx context.Context, db *sql.DB, args []string) error {
 }
 
 // ListenAndServe binds cfg.Addr and returns after ctx is cancelled and the
-// server has shut down. The address must be loopback and include a port.
+// server has shut down. The address must include a port and be loopback,
+// 0.0.0.0, or ::. A specific public address is refused.
 func (e *Explorer) ListenAndServe(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("dbadminer: nil context")
@@ -342,10 +349,15 @@ func (e *Explorer) ListenAndServe(ctx context.Context) error {
 func requireLoopbackAddr(addr string) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil || port == "" {
-		return fmt.Errorf("dbadminer: listen address %q needs a loopback host and port", addr)
+		return fmt.Errorf("dbadminer: listen address %q needs a host and port", addr)
 	}
-	if !isLoopbackAddr(host) {
-		return fmt.Errorf("dbadminer: listen address %q is not loopback", addr)
+	if guard.Loopback(host) || unspecifiedHost(host) {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("dbadminer: listen address %q is not loopback", addr)
+}
+
+func unspecifiedHost(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsUnspecified()
 }

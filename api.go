@@ -12,6 +12,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/dbadminer/dbadminer/internal/guard"
+	"github.com/dbadminer/dbadminer/internal/normalize"
 )
 
 var (
@@ -103,7 +106,7 @@ func (e *Explorer) Handler() http.Handler {
 		mux.Handle("GET /", http.FileServerFS(sub))
 	}
 	var handler http.Handler = mux
-	handler = e.auth.wrap(handler)
+	handler = e.auth.Wrap(handler)
 	handler = e.protect(handler)
 	return handler
 }
@@ -113,7 +116,7 @@ func (e *Explorer) protect(next http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		if err := checkRequestHost(r.Host, r.Header.Get("Origin")); err != nil {
+		if err := guard.CheckRequestHost(r.Host, r.Header.Get("Origin")); err != nil {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -250,10 +253,10 @@ func (e *Explorer) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if e.cfg.ReadOnly {
-		ok, err := isReadOnlySQL(req.SQL)
+		ok, err := guard.ReadOnlySQL(req.SQL)
 		if !ok {
 			status := http.StatusForbidden
-			if errors.Is(err, errEmptySQL) || errors.Is(err, errMultiSQL) || strings.Contains(err.Error(), "unterminated") || strings.Contains(err.Error(), "too long") || strings.Contains(err.Error(), "NUL") {
+			if errors.Is(err, guard.ErrEmpty) || errors.Is(err, guard.ErrMulti) || strings.Contains(err.Error(), "unterminated") || strings.Contains(err.Error(), "too long") || strings.Contains(err.Error(), "NUL") {
 				status = http.StatusBadRequest
 			}
 			msg := "statement is not read-only"
@@ -263,14 +266,14 @@ func (e *Explorer) handleQuery(w http.ResponseWriter, r *http.Request) {
 			e.fail(w, status, msg)
 			return
 		}
-	} else if err := validateStatement(req.SQL); err != nil {
+	} else if err := guard.Validate(req.SQL); err != nil {
 		e.fail(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	var payload rowsPayload
 	err := e.withQueryer(r.Context(), func(ctx context.Context, q queryer) error {
-		if returnsRows(req.SQL) {
+		if guard.ReturnsRows(req.SQL) {
 			set, err := e.queryRows(ctx, q, req.SQL, nil, e.cfg.MaxRows, nil)
 			if err != nil {
 				return err
@@ -673,7 +676,7 @@ func hasColumn(cols []columnInfo, name string) bool {
 func jsonColumnTypes(cols []columnInfo) map[string]string {
 	var types map[string]string
 	for _, col := range cols {
-		if classifyType(col.Type) != kindJSON {
+		if !normalize.IsJSON(col.Type) {
 			continue
 		}
 		if types == nil {
@@ -765,12 +768,12 @@ func scanRows(rows *sql.Rows, maxRows int, maxBytes int64, colTypes map[string]s
 				typeName = types[i].DatabaseTypeName()
 			}
 			if colTypes != nil {
-				if over, ok := colTypes[cols[i]]; ok && classifyType(typeName) != kindJSON {
+				if over, ok := colTypes[cols[i]]; ok && !normalize.IsJSON(typeName) {
 					typeName = over
 				}
 			}
-			row[i] = normalize(raw[i], typeName)
-			used += estimateValue(row[i])
+			row[i] = normalize.Value(raw[i], typeName)
+			used += normalize.Estimate(row[i])
 		}
 		if maxBytes > 0 && used > maxBytes {
 			return resultSet{}, errTooLarge

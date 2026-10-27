@@ -1,6 +1,6 @@
 //go:build integration
 
-package dbadminer_test
+package main
 
 import (
 	"context"
@@ -8,14 +8,13 @@ import (
 	"testing"
 
 	"github.com/dbadminer/dbadminer"
-	"github.com/dbadminer/dbadminer/dbopen"
 )
 
 func TestIntegrationHandlers(t *testing.T) {
 	if os.Getenv("DBADMINER_INTEGRATION") == "" {
 		t.Skip("set DBADMINER_INTEGRATION=1 to run database integration tests")
 	}
-	db, err := dbopen.Open(context.Background())
+	db, err := Open(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

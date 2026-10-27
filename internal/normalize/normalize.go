@@ -1,4 +1,5 @@
-package dbadminer
+// Package normalize turns driver values into JSON-safe forms.
+package normalize
 
 import (
 	"encoding/base64"
@@ -118,6 +119,9 @@ const (
 	kindJSON
 	kindBinary
 )
+
+// IsJSON reports whether typeName is JSON or JSONB.
+func IsJSON(typeName string) bool { return classifyType(typeName) == kindJSON }
 
 func classifyType(typeName string) typeKind {
 	switch strings.ToUpper(strings.TrimSpace(typeName)) {
@@ -399,3 +403,9 @@ func estimateValue(v any) int64 {
 		return 32
 	}
 }
+
+// Value converts a driver value into a JSON-safe form.
+func Value(v any, typeName string) any { return normalize(v, typeName) }
+
+// Estimate reports an approximate encoded size for a normalized value.
+func Estimate(v any) int64 { return estimateValue(v) }

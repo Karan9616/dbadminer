@@ -1,4 +1,4 @@
-package dbadminer
+package guard
 
 import (
 	"strings"
