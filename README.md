@@ -63,15 +63,14 @@ Flags accepted by `Flags` and `Run`: `--addr`, `--access`, `--readonly`, `--user
 
 ## Run the Docker image
 
-The image listens on `0.0.0.0:8080` inside the container. Publish that port only on the host loopback, then open `http://127.0.0.1:8080`:
+The image is not published yet. Build it locally, publish the port only on the host loopback, then open `http://127.0.0.1:8080`:
 
 ```bash
+docker build -t dbadminer .
 docker run --rm -p 127.0.0.1:8080:8080 \
   -e DATABASE_URL='postgres://user:pass@host.docker.internal:5432/app?sslmode=disable' \
-  docker.io/<dockerhub-user>/dbadminer
+  dbadminer
 ```
-
-The same tag workflow that publishes GitHub Release archives also pushes `:<version>` and `:latest` for `linux/amd64` and `linux/arm64`. The image name is `docker.io/${DOCKERHUB_USERNAME}/dbadminer`.
 
 ## HTTP API
 
