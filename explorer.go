@@ -70,6 +70,9 @@ type Config struct {
 	MaxResponseBytes int64
 	// Audit, when set, is called for each statement the explorer executes.
 	Audit func(ctx context.Context, query string, err error)
+	// Schema, when set, hides every other schema. The command sets it from
+	// --schema or DB_SCHEMA. On PostgreSQL that same value is search_path.
+	Schema string
 
 	configured bool
 }
@@ -118,6 +121,9 @@ func (c Config) applyDefaults() Config {
 		}
 		if c.Audit != nil {
 			d.Audit = c.Audit
+		}
+		if c.Schema != "" {
+			d.Schema = c.Schema
 		}
 		c = d
 	}

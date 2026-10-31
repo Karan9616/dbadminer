@@ -191,12 +191,8 @@ func exercise(t *testing.T, db *sql.DB) {
 	}
 
 	page := doRequest(h, http.MethodGet, "/", nil, "")
-	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "DBAdminer") {
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "DBAdminer") || !strings.Contains(page.Body.String(), `src="./assets/`) {
 		t.Fatalf("ui %d %s", page.Code, page.Body.String())
-	}
-	script := doRequest(h, http.MethodGet, "/app.js", nil, "")
-	if script.Code != http.StatusOK || !strings.Contains(script.Body.String(), "textContent") {
-		t.Fatalf("app.js %d", script.Code)
 	}
 
 	tablesRR := doRequest(h, http.MethodGet, "/api/tables", nil, "")
@@ -547,6 +543,45 @@ func TestCancelledQuery(t *testing.T) {
 	ex.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusGatewayTimeout {
 		t.Fatalf("%d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSchemaLimit(t *testing.T) {
+	db := openMem(t)
+	execSQL(t, db, `CREATE TABLE keep (id INTEGER)`)
+	cfg := DefaultConfig()
+	cfg.Schema = "main"
+	ex, err := New(db, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	infoRR := doRequest(ex.Handler(), http.MethodGet, "/api/info", nil, "")
+	var info infoPayload
+	decodeJSON(t, infoRR, &info)
+	if info.Schema != "main" {
+		t.Fatalf("%+v", info)
+	}
+	tablesRR := doRequest(ex.Handler(), http.MethodGet, "/api/tables", nil, "")
+	var tables tablesPayload
+	decodeJSON(t, tablesRR, &tables)
+	if len(tables.Tables) != 1 || tables.Tables[0].Name != "keep" || tables.Tables[0].Schema != "main" {
+		t.Fatalf("%+v", tables.Tables)
+	}
+
+	hidden := DefaultConfig()
+	hidden.Schema = "other"
+	exHidden, err := New(db, hidden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tablesRR = doRequest(exHidden.Handler(), http.MethodGet, "/api/tables", nil, "")
+	decodeJSON(t, tablesRR, &tables)
+	if len(tables.Tables) != 0 {
+		t.Fatalf("%+v", tables.Tables)
+	}
+	missing := doRequest(exHidden.Handler(), http.MethodGet, "/api/tables/main/keep", nil, "")
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("hidden table %d %s", missing.Code, missing.Body.String())
 	}
 }
 

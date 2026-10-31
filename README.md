@@ -1,6 +1,10 @@
 # DBAdminer
 
-DBAdminer is a read-only database explorer for Go. Download a binary and open the UI, embed it next to a `*sql.DB` you already have, or pull the Docker image. The library module imports only the standard library. `cmd/dbadminer` is its own module, so importing the library does not pull in database drivers. Handler tests use SQLite. The module requires Go 1.26 or newer.
+![DBAdminer](docs/logo.svg)
+
+![DBAdminer browsing a table](docs/screenshot.png)
+
+DBAdminer is a database explorer for Go. It starts read-only. Download a binary and open the UI, embed it next to a `*sql.DB` you already have, or pull the Docker image. The library module imports only the standard library. `cmd/dbadminer` is its own module, so importing the library does not pull in database drivers. Handler tests use SQLite. The module requires Go 1.26 or newer.
 
 ## Download a binary
 
@@ -31,6 +35,43 @@ The command uses the first match:
 
 SQLite opens with `mode=ro` while the explorer is read-only. A missing host or port becomes `localhost` and `5432` or `3306`.
 
+These fields override the chosen Postgres or MySQL URL, including `--dsn` and `DATABASE_URL`. A flag wins over the matching variable. SQLite ignores the host, port, user, password, and database name.
+
+| Field | Flag | Variable |
+| --- | --- | --- |
+| Host | `--db-host` | `DB_HOST` |
+| Port | `--db-port` | `DB_PORT` |
+| User | `--db-user` | `DB_USER`, otherwise `DB_USERNAME` |
+| Password | `--db-password` | `DB_PASSWORD` |
+| Database | `--db-name` | `DB_NAME`, otherwise `DB_DATABASE` |
+| Schema | `--schema` | `DB_SCHEMA` |
+
+Put a password that contains `@` in `DB_PASSWORD` or `--db-password`. It is percent-encoded into the Postgres URL, so `p@ss` does not have to be written as `p%40ss`.
+
+```bash
+dbadminer \
+  --dsn 'postgres://postgres:5432/app?sslmode=disable' \
+  --db-user ada \
+  --db-password 'p@ss' \
+  --schema public
+```
+
+`--schema` limits the table list to that schema. On PostgreSQL it also sets `search_path`, so unqualified SQL uses it. The name must be a letter or underscore followed by letters, digits, or underscores. `--user` and `--password` are still basic auth for the page, not the database.
+
+## Read-only and full access
+
+Read-only mode allows one `SELECT`, `WITH`, `EXPLAIN`, `VALUES`, `TABLE`, or `SHOW`. `INSERT`, `UPDATE`, `DELETE`, `CREATE`, `ALTER`, and `DROP` are rejected before they reach the database. PostgreSQL, MySQL, and MariaDB also run those statements in a read-only transaction. SQLite opens with `mode=ro`.
+
+Full access runs one statement with the database user's privileges. That includes DML and DDL. One switch covers both:
+
+```bash
+dbadminer --access=full
+dbadminer --readonly=false
+DBADMINER_ACCESS=full
+```
+
+`--access` takes `readonly` or `full`. The value you type is `readonly`; the README calls that mode read-only. Set only one of `--access` and `--readonly`. Full access still accepts one statement at a time.
+
 ## Use it as a library
 
 Import `github.com/dbadminer/dbadminer` and pass the pool you already have. That import does not add database drivers to your module.
@@ -57,20 +98,25 @@ Setting `ReadOnly` to false on that configured value still selects full access. 
 
 Mount `ex.Handler()` on your own server if you want. Requests whose `Host` header is not loopback are rejected, and a present `Origin` must match that host.
 
-Flags accepted by `Flags` and `Run`: `--addr`, `--access`, `--readonly`, `--user`, `--password`, `--max-rows`, `--query-timeout`, `--max-body`, `--max-response`. `--access` is `readonly` or `full`. `--readonly=false` selects full access as well. Set only one of those two flags. `cmd/dbadminer` also accepts `--dsn`, and `DBADMINER_ACCESS=readonly` or `DBADMINER_ACCESS=full` when neither flag is present. `--user` and `--password` are basic auth for the page. They are never taken from the database password.
+Flags accepted by `Flags` and `Run`: `--addr`, `--access`, `--readonly`, `--user`, `--password`, `--max-rows`, `--query-timeout`, `--max-body`, `--max-response`. Access is described above. `cmd/dbadminer` also accepts `--dsn`, `--db-host`, `--db-port`, `--db-user`, `--db-password`, `--db-name`, and `--schema`. `--user` and `--password` are basic auth for the page. They are never taken from the database password. `Config.Schema` hides every other schema for a pool you already opened.
 
 `examples/http`, `examples/chi`, and `examples/cobra` show how to mount the handler.
 
 ## Run the Docker image
 
-The image is not published yet. Build it locally, publish the port only on the host loopback, then open `http://127.0.0.1:8080`:
+A tag named `v*` publishes `docker.io/<Docker Hub user>/dbadminer` for that version and for `latest`. The Docker Hub user comes from the `DOCKERHUB_USERNAME` Actions secret. You can also build it locally, publish the port only on the host loopback, then open `http://127.0.0.1:8080`:
 
 ```bash
 docker build -t dbadminer .
 docker run --rm -p 127.0.0.1:8080:8080 \
-  -e DATABASE_URL='postgres://user:pass@host.docker.internal:5432/app?sslmode=disable' \
+  -e DATABASE_URL='postgres://postgres:5432/app?sslmode=disable' \
+  -e DB_USER=ada \
+  -e DB_PASSWORD='p@ss' \
+  -e DB_SCHEMA=public \
   dbadminer
 ```
+
+The image starts read-only. Add `-e DBADMINER_ACCESS=full` when the database user should be allowed to run DML and DDL.
 
 ## HTTP API
 
@@ -84,7 +130,7 @@ docker run --rm -p 127.0.0.1:8080:8080 \
 
 ## Safety
 
-Read-only mode is best effort. Use a database user that only has `SELECT`, and open SQLite with `mode=ro`. DBAdminer also rejects non-read statements, uses a read-only transaction on PostgreSQL, MySQL, and MariaDB, and quotes identifiers only after a catalog match. Details are in [SECURITY.md](SECURITY.md).
+Read-only mode is best effort. Use a database user that only has `SELECT`, and open SQLite with `mode=ro`. DBAdminer also rejects non-read statements, uses a read-only transaction on PostgreSQL, MySQL, and MariaDB, and quotes identifiers only after a catalog match. Full access adds no privileges of its own: the statement runs as the database user, one statement at a time. Details are in [SECURITY.md](SECURITY.md).
 
 ## Tests
 

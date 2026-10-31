@@ -56,6 +56,7 @@ type infoPayload struct {
 	Dialect  string `json:"dialect"`
 	Access   string `json:"access"`
 	ReadOnly bool   `json:"readOnly"`
+	Schema   string `json:"schema,omitempty"`
 }
 
 type tablesPayload struct {
@@ -131,6 +132,7 @@ func (e *Explorer) handleInfo(w http.ResponseWriter, r *http.Request) {
 		Dialect:  e.dialect.Name(),
 		Access:   e.cfg.Access,
 		ReadOnly: e.cfg.ReadOnly,
+		Schema:   e.cfg.Schema,
 	})
 }
 
@@ -384,6 +386,9 @@ func (e *Explorer) listTables(ctx context.Context, q queryer) ([]tableInfo, erro
 		if err := rows.Scan(&schema, &name, &kind); err != nil {
 			return nil, err
 		}
+		if e.cfg.Schema != "" && schema != e.cfg.Schema {
+			continue
+		}
 		tables = append(tables, tableInfo{Schema: schema, Name: name, Type: normalizeTableType(kind)})
 	}
 	if err := rows.Err(); err != nil {
@@ -397,6 +402,9 @@ func (e *Explorer) listTables(ctx context.Context, q queryer) ([]tableInfo, erro
 
 func (e *Explorer) ensureTable(ctx context.Context, q queryer, schema, table string) error {
 	if schema == "" || table == "" || strings.Contains(schema, "\x00") || strings.Contains(table, "\x00") {
+		return errNotFound
+	}
+	if e.cfg.Schema != "" && schema != e.cfg.Schema {
 		return errNotFound
 	}
 	query, _, ok := existsQuery(e.dialect, schema)

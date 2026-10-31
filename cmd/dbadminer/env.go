@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -12,18 +13,31 @@ import (
 var ErrNoDatabase = errors.New("dbadminer: no database configured")
 
 // Conn is a driver name and DSN resolved from flags or environment variables.
-// Driver is "pgx", "mysql", or "sqlite".
+// Driver is "pgx", "mysql", or "sqlite". Schema, when set, limits the catalog.
+// On PostgreSQL it is also written into the DSN as search_path.
 type Conn struct {
 	Driver string
 	DSN    string
 	Source string
+	Schema string
 }
 
 // ResolveConn selects a database from dsnFlag or getenv. readOnly adds
 // mode=ro to SQLite DSNs. The first match wins: --dsn, DATABASE_URL,
 // DATABASE_PRIVATE_URL, a single engine URL, then libpq, Docker Postgres,
-// MySQL, generic DB_*, and SQLite path variables.
+// MySQL, generic DB_*, and SQLite path variables. After that match, non-empty
+// DB_HOST, DB_PORT, DB_USER (or DB_USERNAME), DB_PASSWORD, DB_NAME (or
+// DB_DATABASE), and DB_SCHEMA override the chosen Postgres or MySQL connection.
+// DB_SCHEMA also applies to SQLite, where it only limits the catalog.
 func ResolveConn(getenv func(string) string, dsnFlag string, readOnly bool) (Conn, error) {
+	conn, err := resolveConn(getenv, dsnFlag, readOnly)
+	if err != nil {
+		return Conn{}, err
+	}
+	return applyOptions(conn, getenv)
+}
+
+func resolveConn(getenv func(string) string, dsnFlag string, readOnly bool) (Conn, error) {
 	get := func(key string) (string, error) {
 		if getenv == nil {
 			return "", nil
@@ -477,4 +491,249 @@ func forceSQLiteReadOnly(dsn string) string {
 		return u.String()
 	}
 	return dsn + "?mode=ro"
+}
+
+type connOptions struct {
+	host, port, user, pass, dbName, schema string
+}
+
+func applyOptions(conn Conn, getenv func(string) string) (Conn, error) {
+	get := func(key string) (string, error) {
+		if getenv == nil {
+			return "", nil
+		}
+		return cleanValue(getenv(key))
+	}
+	host, err := get("DB_HOST")
+	if err != nil {
+		return Conn{}, err
+	}
+	port, err := get("DB_PORT")
+	if err != nil {
+		return Conn{}, err
+	}
+	user, err := first(get, "DB_USER", "DB_USERNAME")
+	if err != nil {
+		return Conn{}, err
+	}
+	pass, err := get("DB_PASSWORD")
+	if err != nil {
+		return Conn{}, err
+	}
+	dbName, err := first(get, "DB_NAME", "DB_DATABASE")
+	if err != nil {
+		return Conn{}, err
+	}
+	schema, err := get("DB_SCHEMA")
+	if err != nil {
+		return Conn{}, err
+	}
+	if schema != "" {
+		if err := validateSchema(schema); err != nil {
+			return Conn{}, err
+		}
+		conn.Schema = schema
+	}
+	opts := connOptions{host: host, port: port, user: user, pass: pass, dbName: dbName, schema: schema}
+	if host == "" && port == "" && user == "" && pass == "" && dbName == "" && schema == "" {
+		return conn, nil
+	}
+	switch conn.Driver {
+	case "pgx":
+		dsn, err := overlayPostgres(conn.DSN, opts)
+		if err != nil {
+			return Conn{}, err
+		}
+		conn.DSN = dsn
+		return conn, nil
+	case "mysql":
+		if host == "" && port == "" && user == "" && pass == "" && dbName == "" {
+			return conn, nil
+		}
+		dsn, err := overlayMySQL(conn.DSN, opts)
+		if err != nil {
+			return Conn{}, err
+		}
+		conn.DSN = dsn
+		return conn, nil
+	default:
+		return conn, nil
+	}
+}
+
+func validateSchema(schema string) error {
+	if len(schema) > 63 || !schemaName.MatchString(schema) {
+		return fmt.Errorf("dbadminer: schema %q must be a letter or underscore followed by letters, digits, or underscores", schema)
+	}
+	return nil
+}
+
+var schemaName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func overlayPostgres(dsn string, opts connOptions) (string, error) {
+	if strings.Contains(dsn, "://") {
+		return overlayPostgresURL(dsn, opts)
+	}
+	return overlayPostgresKeywords(dsn, opts)
+}
+
+func overlayPostgresURL(raw string, opts connOptions) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("dbadminer: parse database URL: %w", err)
+	}
+	if opts.host != "" || opts.port != "" {
+		host := u.Hostname()
+		port := u.Port()
+		if opts.host != "" {
+			host = opts.host
+		}
+		if opts.port != "" {
+			port = opts.port
+		}
+		if host == "" {
+			host = "localhost"
+		}
+		if port == "" {
+			u.Host = host
+		} else {
+			u.Host = net.JoinHostPort(host, port)
+		}
+	}
+	user, pass := "", ""
+	if u.User != nil {
+		user = u.User.Username()
+		pass, _ = u.User.Password()
+	}
+	if opts.user != "" {
+		user = opts.user
+	}
+	if opts.pass != "" {
+		pass = opts.pass
+	}
+	switch {
+	case user == "" && pass == "":
+		u.User = nil
+	case pass == "":
+		u.User = url.User(user)
+	default:
+		u.User = url.UserPassword(user, pass)
+	}
+	if opts.dbName != "" {
+		u.Path = "/" + opts.dbName
+	}
+	if opts.schema != "" {
+		q := u.Query()
+		q.Set("search_path", opts.schema)
+		u.RawQuery = q.Encode()
+	}
+	return u.String(), nil
+}
+
+func overlayPostgresKeywords(dsn string, opts connOptions) (string, error) {
+	var err error
+	if opts.host != "" {
+		dsn, err = setKeyword(dsn, "host", opts.host)
+		if err != nil {
+			return "", err
+		}
+	}
+	if opts.port != "" {
+		dsn, err = setKeyword(dsn, "port", opts.port)
+		if err != nil {
+			return "", err
+		}
+	}
+	if opts.user != "" {
+		dsn, err = setKeyword(dsn, "user", opts.user)
+		if err != nil {
+			return "", err
+		}
+	}
+	if opts.pass != "" {
+		dsn, err = setKeyword(dsn, "password", opts.pass)
+		if err != nil {
+			return "", err
+		}
+	}
+	if opts.dbName != "" {
+		dsn, err = setKeyword(dsn, "dbname", opts.dbName)
+		if err != nil {
+			return "", err
+		}
+	}
+	if opts.schema != "" {
+		dsn, err = setKeyword(dsn, "search_path", opts.schema)
+		if err != nil {
+			return "", err
+		}
+	}
+	return dsn, nil
+}
+
+func setKeyword(dsn, key, value string) (string, error) {
+	if strings.ContainsAny(value, " \t'\"\\") {
+		return "", fmt.Errorf("dbadminer: %s contains a character that cannot be placed in a keyword DSN; use a database URL", key)
+	}
+	re := regexp.MustCompile(`(?i)(^|\s)` + regexp.QuoteMeta(key) + `=\S*`)
+	if re.MatchString(dsn) {
+		return strings.TrimSpace(re.ReplaceAllString(dsn, "${1}"+key+"="+value)), nil
+	}
+	return strings.TrimSpace(dsn + " " + key + "=" + value), nil
+}
+
+func overlayMySQL(dsn string, opts connOptions) (string, error) {
+	user, pass, host, port, dbName, params, err := splitMySQLDSN(dsn)
+	if err != nil {
+		return "", err
+	}
+	if opts.user != "" {
+		user = opts.user
+	}
+	if opts.pass != "" {
+		pass = opts.pass
+	}
+	if opts.host != "" {
+		host = opts.host
+	}
+	if opts.port != "" {
+		port = opts.port
+	}
+	if opts.dbName != "" {
+		dbName = opts.dbName
+	}
+	return formatMySQLDSN(user, pass, host, port, dbName, params)
+}
+
+func splitMySQLDSN(dsn string) (user, pass, host, port, dbName string, params url.Values, err error) {
+	base, query, _ := strings.Cut(dsn, "?")
+	if query != "" {
+		params, err = url.ParseQuery(query)
+		if err != nil {
+			return "", "", "", "", "", nil, fmt.Errorf("dbadminer: parse MySQL DSN: %w", err)
+		}
+	}
+	rest := base
+	userinfo := ""
+	if i := strings.Index(base, "@tcp("); i >= 0 {
+		userinfo = base[:i]
+		rest = base[i+1:]
+	}
+	if !strings.HasPrefix(rest, "tcp(") {
+		return "", "", "", "", "", nil, errors.New("dbadminer: cannot apply DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, or DB_NAME to this MySQL DSN")
+	}
+	end := strings.Index(rest, ")")
+	if end < 0 {
+		return "", "", "", "", "", nil, errors.New("dbadminer: cannot apply DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, or DB_NAME to this MySQL DSN")
+	}
+	addr := rest[len("tcp("):end]
+	host, port, err = net.SplitHostPort(addr)
+	if err != nil {
+		host, port, err = addr, "", nil
+	}
+	dbName = strings.TrimPrefix(rest[end+1:], "/")
+	if userinfo != "" {
+		user, pass, _ = strings.Cut(userinfo, ":")
+	}
+	return user, pass, host, port, dbName, params, nil
 }

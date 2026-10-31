@@ -12,3 +12,4 @@ vendor/
 go.work
 go.work.sum
 dbadminer.db
+web/node_modules

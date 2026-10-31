@@ -4,7 +4,7 @@ GO_TOOL := go tool -modfile=$(CURDIR)/tools/go.mod
 DATABASE_URL ?= postgres://dbadminer:dbadminer@127.0.0.1:5432/dbadminer?sslmode=disable
 MODULES := cmd/dbadminer examples/http examples/chi examples/cobra
 
-.PHONY: check fmt vet lint test vuln tidy integration
+.PHONY: check fmt vet lint test vuln tidy integration ui ui-check
 
 fmt:
 	gofmt -w .
@@ -37,3 +37,12 @@ check: fmt vet lint test vuln
 
 integration:
 	DBADMINER_INTEGRATION=1 DATABASE_URL='$(DATABASE_URL)' go -C cmd/dbadminer test -tags integration -count=1 -timeout 20m ./...
+
+ui:
+	npm ci --prefix web
+	npm run build --prefix web
+
+ui-check:
+	npm ci --prefix web
+	npm run check --prefix web
+	npm run build --prefix web

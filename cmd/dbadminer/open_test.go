@@ -30,7 +30,7 @@ func TestOpenSQLiteReadOnly(t *testing.T) {
 		}
 		return ""
 	}
-	ro, err := open(context.Background(), getenv, "", true)
+	ro, _, err := open(context.Background(), getenv, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestOpenSQLiteReadOnly(t *testing.T) {
 		t.Fatalf("read id=%d err=%v", id, err)
 	}
 
-	rw, err := open(context.Background(), getenv, "", false)
+	rw, _, err := open(context.Background(), getenv, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestOpenSQLiteReadOnly(t *testing.T) {
 }
 
 func TestOpenMissingEnv(t *testing.T) {
-	_, err := open(context.Background(), func(string) string { return "" }, "", true)
+	_, _, err := open(context.Background(), func(string) string { return "" }, "", true)
 	if err == nil {
 		t.Fatal("expected error")
 	}

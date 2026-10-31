@@ -180,6 +180,97 @@ func TestResolveConnErrors(t *testing.T) {
 	}
 }
 
+func TestResolveConnSeparateOptions(t *testing.T) {
+	conn, err := ResolveConn(envOf(map[string]string{
+		"DATABASE_URL": "postgres://postgres:5432/postgres?sslmode=disable",
+		"DB_USER":      "root",
+		"DB_PASSWORD":  "root@123",
+		"DB_SCHEMA":    "public",
+	}), "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(conn.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pass, _ := u.User.Password()
+	if u.User.Username() != "root" || pass != "root@123" || u.Hostname() != "postgres" || u.Port() != "5432" || u.Path != "/postgres" {
+		t.Fatalf("%s", conn.DSN)
+	}
+	if u.Query().Get("sslmode") != "disable" || u.Query().Get("search_path") != "public" || conn.Schema != "public" {
+		t.Fatalf("%s schema=%s", conn.DSN, conn.Schema)
+	}
+
+	overridden, err := ResolveConn(envOf(map[string]string{
+		"DATABASE_URL": "postgres://ada:secret@old.example:5432/old?sslmode=require",
+		"DB_HOST":      "db.example",
+		"DB_PORT":      "5433",
+		"DB_NAME":      "app",
+	}), "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err = url.Parse(overridden.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pass, _ = u.User.Password()
+	if u.Hostname() != "db.example" || u.Port() != "5433" || u.Path != "/app" || u.User.Username() != "ada" || pass != "secret" || u.Query().Get("sslmode") != "require" {
+		t.Fatalf("%s", overridden.DSN)
+	}
+
+	keyword, err := ResolveConn(nil, "host=localhost dbname=app user=ada", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keyword.Driver != "pgx" || !strings.Contains(keyword.DSN, "host=localhost") {
+		t.Fatalf("%+v", keyword)
+	}
+	keyword, err = ResolveConn(envOf(map[string]string{
+		"DB_PASSWORD": "p@ss",
+		"DB_SCHEMA":   "app",
+	}), "host=localhost dbname=app user=ada", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(keyword.DSN, "password=p@ss") || !strings.Contains(keyword.DSN, "search_path=app") || keyword.Schema != "app" {
+		t.Fatalf("%+v", keyword)
+	}
+
+	mysqlConn, err := ResolveConn(envOf(map[string]string{
+		"DATABASE_URL": "mysql://alice:secret@127.0.0.1:3306/app",
+		"DB_HOST":      "db.example",
+		"DB_PORT":      "3307",
+		"DB_SCHEMA":    "app",
+	}), "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(mysqlConn.DSN, "tcp(db.example:3307)/app") || mysqlConn.Schema != "app" {
+		t.Fatalf("%+v", mysqlConn)
+	}
+
+	if _, err := ResolveConn(envOf(map[string]string{
+		"DATABASE_URL": "postgres://db.example/app",
+		"DB_SCHEMA":    "public;drop",
+	}), "", true); err == nil {
+		t.Fatal("expected schema rejection")
+	}
+
+	sqliteConn, err := ResolveConn(envOf(map[string]string{
+		"SQLITE_PATH": "/tmp/app.db",
+		"DB_SCHEMA":   "main",
+		"DB_HOST":     "ignored.example",
+	}), "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sqliteConn.Schema != "main" || strings.Contains(sqliteConn.DSN, "ignored.example") {
+		t.Fatalf("%+v", sqliteConn)
+	}
+}
+
 func TestSQLiteModeOverride(t *testing.T) {
 	conn, err := ResolveConn(envOf(map[string]string{
 		"SQLITE_URL": "file:/tmp/app.db?mode=rw",
