@@ -9,6 +9,14 @@ export interface Info {
   schema?: string;
 }
 
+export interface DatabaseInfo {
+  name: string;
+  dialect: Dialect;
+  schema?: string;
+  access: Info["access"];
+  readOnly: boolean;
+}
+
 export interface TableInfo {
   schema: string;
   name: string;
@@ -59,6 +67,16 @@ export class ApiError extends Error {
   }
 }
 
+let database = "";
+
+export function setDatabase(name: string): void {
+  database = name;
+}
+
+function root(): string {
+  return database ? `api/databases/${encodeURIComponent(database)}` : "api";
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
   const text = await res.text();
@@ -78,13 +96,32 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function tablePath(schema: string, table: string): string {
-  return `api/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`;
+  return `${root()}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`;
 }
 
 export const api = {
-  info: () => request<Info>("api/info"),
+  databases: async (): Promise<DatabaseInfo[]> => {
+    const res = await fetch("api/databases");
+    if (res.status === 404) return [];
+    const text = await res.text();
+    let body: unknown = null;
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = { error: text };
+      }
+    }
+    if (!res.ok) {
+      const msg = (body as { error?: string } | null)?.error ?? res.statusText;
+      throw new ApiError(msg, res.status);
+    }
+    return (body as { databases?: DatabaseInfo[] } | null)?.databases ?? [];
+  },
 
-  tables: async () => (await request<{ tables: TableInfo[] }>("api/tables")).tables ?? [],
+  info: () => request<Info>(`${root()}/info`),
+
+  tables: async () => (await request<{ tables: TableInfo[] }>(`${root()}/tables`)).tables ?? [],
 
   table: (schema: string, table: string) => request<TableDetail>(tablePath(schema, table)),
 
@@ -99,7 +136,7 @@ export const api = {
   },
 
   query: (sql: string) =>
-    request<ResultSet>("api/query", {
+    request<ResultSet>(`${root()}/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sql }),

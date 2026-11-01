@@ -50,17 +50,16 @@ func Run(ctx context.Context, args []string) error {
 		return err
 	}
 	getenv := overlayGetenv(os.Getenv, *dbHost, *dbPort, *dbUser, *dbPassword, *dbName, *schema)
-	db, schemaName, err := open(ctx, getenv, *dsn, cfg.ReadOnly)
+	items, err := openConfigured(ctx, cfg, getenv, *dsn)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = db.Close() }()
-	cfg.Schema = schemaName
-	ex, err := dbadminer.New(db, cfg)
-	if err != nil {
-		return err
-	}
-	return ex.ListenAndServe(ctx)
+	defer func() {
+		for _, item := range items {
+			_ = item.db.Close()
+		}
+	}()
+	return dbadminer.Serve(ctx, cfg, handlerFor(items))
 }
 
 func open(ctx context.Context, getenv func(string) string, dsn string, readOnly bool) (*sql.DB, string, error) {

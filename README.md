@@ -98,7 +98,7 @@ Setting `ReadOnly` to false on that configured value still selects full access. 
 
 Mount `ex.Handler()` on your own server if you want. Requests whose `Host` header is not loopback are rejected, and a present `Origin` must match that host.
 
-Flags accepted by `Flags` and `Run`: `--addr`, `--access`, `--readonly`, `--user`, `--password`, `--max-rows`, `--query-timeout`, `--max-body`, `--max-response`. Access is described above. `cmd/dbadminer` also accepts `--dsn`, `--db-host`, `--db-port`, `--db-user`, `--db-password`, `--db-name`, and `--schema`. `--user` and `--password` are basic auth for the page. They are never taken from the database password. `Config.Schema` hides every other schema for a pool you already opened.
+Flags accepted by `Flags` and `Run`: `--addr`, `--access`, `--readonly`, `--user`, `--password`, `--max-rows`, `--query-timeout`, `--max-body`, `--max-response`. Access is described above. `cmd/dbadminer` also accepts `--dsn`, `--db-host`, `--db-port`, `--db-user`, `--db-password`, `--db-name`, and `--schema`. `DBADMINER_DATABASES` names more than one database; each name prefixes those variables, as in the Docker section. `--user` and `--password` are basic auth for the page. They are never taken from the database password. `Config.Schema` hides every other schema for a pool you already opened.
 
 `examples/http`, `examples/chi`, and `examples/cobra` show how to mount the handler.
 
@@ -118,13 +118,55 @@ docker run --rm -p 127.0.0.1:8080:8080 \
 
 The image starts read-only. Add `-e DBADMINER_ACCESS=full` when the database user should be allowed to run DML and DDL.
 
+To open more than one database, set `DBADMINER_DATABASES` to a comma-separated list of names. Each name is a prefix: `SHOP_DATABASE_URL` is read as `DATABASE_URL`, and `SHOP_DB_PASSWORD` is read as `DB_PASSWORD`. `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_NAME`, and `DB_SCHEMA` work the same way. Hostnames are the Compose service names. Put the variables on the service, or in a `.env` file selected with `env_file` (the same file works with `docker run --env-file`).
+
+```yaml
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ada
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: app
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_USER: ada
+      MYSQL_PASSWORD: secret
+      MYSQL_DATABASE: shop
+      MYSQL_ROOT_PASSWORD: root
+  dbadminer:
+    image: docker.io/<user>/dbadminer:latest
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DBADMINER_DATABASES: shop,app
+      SHOP_DATABASE_URL: mysql://mysql:3306/shop
+      SHOP_DB_USER: ada
+      SHOP_DB_PASSWORD: secret
+      APP_DATABASE_URL: postgres://postgres:5432/app?sslmode=disable
+      APP_DB_USER: ada
+      APP_DB_PASSWORD: secret
+      APP_DB_SCHEMA: public
+```
+
+`.env` holds the same `DBADMINER_DATABASES` and prefixed lines. The service then uses `env_file: .env` instead of `environment`. The page shows a database switcher when more than one name is configured. `GET /api/info` and the other unprefixed routes use the first name. `--dsn` cannot be combined with `DBADMINER_DATABASES`.
+
 ## HTTP API
 
+- `GET /api/databases`
+- `GET /api/databases/{name}/info`
+- `GET /api/databases/{name}/tables`
+- `GET /api/databases/{name}/tables/{schema}/{table}`
+- `GET /api/databases/{name}/tables/{schema}/{table}/rows?limit&offset&order&dir&count=1`
+- `POST /api/databases/{name}/query` with `{"sql":"select 1"}` and `Content-Type: application/json`
 - `GET /api/info`
 - `GET /api/tables`
 - `GET /api/tables/{schema}/{table}`
 - `GET /api/tables/{schema}/{table}/rows?limit&offset&order&dir&count=1`
 - `POST /api/query` with `{"sql":"select 1"}` and `Content-Type: application/json`
+
+`GET /api/databases` lists `name`, `dialect`, `schema`, `access`, and `readOnly`. It does not include the host, user, or password. With one database the unprefixed routes are the whole API. With several, the unprefixed routes follow the first name in `DBADMINER_DATABASES`.
 
 `count=1` opts into `COUNT(*)`. The page size is capped by `MaxRows`.
 

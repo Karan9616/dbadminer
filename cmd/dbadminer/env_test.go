@@ -271,6 +271,47 @@ func TestResolveConnSeparateOptions(t *testing.T) {
 	}
 }
 
+func TestDatabaseNames(t *testing.T) {
+	names, err := databaseNames(" shop, app ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 2 || names[0] != "shop" || names[1] != "app" {
+		t.Fatalf("%v", names)
+	}
+	if _, err := databaseNames("shop,shop"); err == nil {
+		t.Fatal("expected duplicate rejection")
+	}
+	if _, err := databaseNames("shop,my-db"); err == nil {
+		t.Fatal("expected name rejection")
+	}
+	empty, err := databaseNames("  ")
+	if err != nil || empty != nil {
+		t.Fatalf("%v %v", empty, err)
+	}
+}
+
+func TestPrefixedDatabasePassword(t *testing.T) {
+	conn, err := ResolveConn(prefixedGetenv(envOf(map[string]string{
+		"APP_DATABASE_URL": "postgres://postgres:5432/app?sslmode=disable",
+		"APP_DB_USER":      "ada",
+		"APP_DB_PASSWORD":  "p@ss",
+		"APP_DB_SCHEMA":    "public",
+		"DATABASE_URL":     "postgres://ignored.example/nope",
+	}), "app"), "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(conn.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pass, _ := u.User.Password()
+	if u.User.Username() != "ada" || pass != "p@ss" || u.Hostname() != "postgres" || u.Query().Get("search_path") != "public" || conn.Schema != "public" {
+		t.Fatalf("%s schema=%s", conn.DSN, conn.Schema)
+	}
+}
+
 func TestSQLiteModeOverride(t *testing.T) {
 	conn, err := ResolveConn(envOf(map[string]string{
 		"SQLITE_URL": "file:/tmp/app.db?mode=rw",

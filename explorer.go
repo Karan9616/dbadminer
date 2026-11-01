@@ -313,18 +313,28 @@ func Run(ctx context.Context, db *sql.DB, args []string) error {
 // server has shut down. The address must include a port and be loopback,
 // 0.0.0.0, or ::. A specific public address is refused.
 func (e *Explorer) ListenAndServe(ctx context.Context) error {
+	return Serve(ctx, e.cfg, e.Handler())
+}
+
+// Serve binds cfg.Addr and serves handler until ctx is cancelled. The address
+// rules match ListenAndServe.
+func Serve(ctx context.Context, cfg Config, handler http.Handler) error {
 	if ctx == nil {
 		return errors.New("dbadminer: nil context")
 	}
-	if err := requireLoopbackAddr(e.cfg.Addr); err != nil {
+	if handler == nil {
+		return errors.New("dbadminer: nil handler")
+	}
+	cfg = cfg.applyDefaults()
+	if err := requireLoopbackAddr(cfg.Addr); err != nil {
 		return err
 	}
 	srv := &http.Server{
-		Addr:              e.cfg.Addr,
-		Handler:           e.Handler(),
+		Addr:              cfg.Addr,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       e.cfg.QueryTimeout + 10*time.Second,
-		WriteTimeout:      e.cfg.QueryTimeout + 10*time.Second,
+		ReadTimeout:       cfg.QueryTimeout + 10*time.Second,
+		WriteTimeout:      cfg.QueryTimeout + 10*time.Second,
 		IdleTimeout:       time.Minute,
 	}
 	errCh := make(chan error, 1)

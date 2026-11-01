@@ -1,7 +1,7 @@
 import { createContext } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
 import { toast as notify } from "svelte-sonner";
-import { api, tableKey, type Info, type ResultSet, type TableDetail, type TableInfo } from "./api";
+import { api, setDatabase, tableKey, type DatabaseInfo, type Info, type ResultSet, type TableDetail, type TableInfo } from "./api";
 import { applyTheme, loadThemePreference, saveThemePreference, type ThemePreference } from "./theme";
 
 export type View = "data" | "structure" | "sql";
@@ -14,13 +14,18 @@ export interface HistoryEntry {
 }
 
 const HISTORY_KEY = "dbadminer:history";
+const DATABASE_KEY = "dbadminer:database";
 const PAGE_SIZE_KEY = "dbadminer:page-size";
 const HISTORY_MAX = 50;
 export const PAGE_SIZES = [25, 50, 100, 200] as const;
 
-function loadHistory(): HistoryEntry[] {
+function historyKey(name: string): string {
+  return name ? `${HISTORY_KEY}:${name}` : HISTORY_KEY;
+}
+
+function loadHistory(name = ""): HistoryEntry[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
+    const raw = JSON.parse(localStorage.getItem(historyKey(name)) ?? "[]");
     return Array.isArray(raw) ? raw.filter((e) => typeof e?.sql === "string").slice(0, HISTORY_MAX) : [];
   } catch {
     return [];
@@ -69,6 +74,8 @@ export class SqlState {
 }
 
 export class AppState {
+  databases = $state.raw<DatabaseInfo[]>([]);
+  database = $state("");
   info = $state.raw<Info | null>(null);
   tables = $state.raw<TableInfo[]>([]);
   tablesLoading = $state(true);
@@ -89,8 +96,40 @@ export class AppState {
 
   async init(): Promise<void> {
     try {
+      this.databases = await api.databases();
+    } catch (err) {
+      this.databases = [];
+      this.toast("error", `Could not load databases: ${message(err)}`);
+    }
+    const saved = localStorage.getItem(DATABASE_KEY) ?? "";
+    const chosen = this.databases.some((db) => db.name === saved) ? saved : (this.databases[0]?.name ?? "");
+    await this.useDatabase(chosen, false);
+  }
+
+  async selectDatabase(name: string): Promise<void> {
+    if (!name || name === this.database) return;
+    await this.useDatabase(name, true);
+  }
+
+  async useDatabase(name: string, reset: boolean): Promise<void> {
+    this.database = name;
+    setDatabase(name);
+    if (name) localStorage.setItem(DATABASE_KEY, name);
+    this.history = loadHistory(name);
+    if (reset) {
+      this.selected = null;
+      this.grid.reset();
+      this.sql.result = null;
+      this.sql.error = null;
+      this.sql.durationMs = null;
+      this.details.clear();
+      this.detailErrors.clear();
+      this.tables = [];
+    }
+    try {
       this.info = await api.info();
     } catch (err) {
+      this.info = null;
       this.toast("error", `Could not load server info: ${message(err)}`);
     }
     await this.loadTables();
@@ -220,12 +259,12 @@ export class AppState {
   #remember(entry: HistoryEntry): void {
     const rest = this.history.filter((h) => h.sql !== entry.sql);
     this.history = [entry, ...rest].slice(0, HISTORY_MAX);
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(this.history));
+    localStorage.setItem(historyKey(this.database), JSON.stringify(this.history));
   }
 
   clearHistory(): void {
     this.history = [];
-    localStorage.removeItem(HISTORY_KEY);
+    localStorage.removeItem(historyKey(this.database));
   }
 
   openSql(text?: string): void {

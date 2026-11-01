@@ -28,6 +28,20 @@
 
   <Logo wordmark class="text-foreground" />
 
+  {#if app.databases.length > 1}
+    <label class="sr-only" for="database">Database</label>
+    <select
+      id="database"
+      class="h-7 max-w-36 rounded-md border border-border bg-background px-2 font-mono text-[12.5px]"
+      value={app.database}
+      onchange={(event) => app.selectDatabase(event.currentTarget.value)}
+    >
+      {#each app.databases as db (db.name)}
+        <option value={db.name}>{db.name}</option>
+      {/each}
+    </select>
+  {/if}
+
   {#if app.info}
     <div class="ml-1 hidden items-center gap-1.5 md:flex">
       <Badge variant="outline" title="Database dialect">

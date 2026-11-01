@@ -90,26 +90,71 @@ type resultSet struct {
 	truncated bool
 }
 
-// Handler returns the explorer UI and JSON API. The handler rejects requests
-// whose Host header is not loopback.
-func (e *Explorer) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/info", e.handleInfo)
-	mux.HandleFunc("GET /api/tables", e.handleTables)
-	mux.HandleFunc("GET /api/tables/{schema}/{table}/rows", e.handleRows)
-	mux.HandleFunc("GET /api/tables/{schema}/{table}", e.handleColumns)
-	mux.HandleFunc("POST /api/query", e.handleQuery)
+// DatabaseInfo is one configured database. It is safe to send to the browser:
+// it has no host, user, or password.
+type DatabaseInfo struct {
+	Name     string `json:"name"`
+	Dialect  string `json:"dialect"`
+	Schema   string `json:"schema,omitempty"`
+	Access   string `json:"access"`
+	ReadOnly bool   `json:"readOnly"`
+}
+
+// DatabaseInfo describes this explorer for a database list.
+func (e *Explorer) DatabaseInfo(name string) DatabaseInfo {
+	return DatabaseInfo{
+		Name:     name,
+		Dialect:  e.dialect.Name(),
+		Schema:   e.cfg.Schema,
+		Access:   e.cfg.Access,
+		ReadOnly: e.cfg.ReadOnly,
+	}
+}
+
+// MountAPI registers this explorer at base, for example "/api" or
+// "/api/databases/shop". base has no trailing slash.
+func (e *Explorer) MountAPI(mux *http.ServeMux, base string) {
+	if mux == nil {
+		panic("dbadminer: MountAPI mux is nil")
+	}
+	base = strings.TrimRight(base, "/")
+	mux.HandleFunc("GET "+base+"/info", e.handleInfo)
+	mux.HandleFunc("GET "+base+"/tables", e.handleTables)
+	mux.HandleFunc("GET "+base+"/tables/{schema}/{table}/rows", e.handleRows)
+	mux.HandleFunc("GET "+base+"/tables/{schema}/{table}", e.handleColumns)
+	mux.HandleFunc("POST "+base+"/query", e.handleQuery)
+}
+
+// MountUI registers the explorer pages at /.
+func MountUI(mux *http.ServeMux) {
+	if mux == nil {
+		panic("dbadminer: MountUI mux is nil")
+	}
 	if sub, err := fs.Sub(uiFiles, "ui"); err != nil {
 		mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "UI unavailable", http.StatusInternalServerError)
 		}))
+		return
 	} else {
 		mux.Handle("GET /", http.FileServerFS(sub))
 	}
-	var handler http.Handler = mux
-	handler = e.auth.Wrap(handler)
-	handler = e.protect(handler)
-	return handler
+}
+
+// Wrap applies basic auth and the host check used by Handler.
+func (e *Explorer) Wrap(handler http.Handler) http.Handler {
+	if handler == nil {
+		panic("dbadminer: Wrap handler is nil")
+	}
+	return e.protect(e.auth.Wrap(handler))
+}
+
+// Handler returns the explorer UI and JSON API. The handler rejects requests
+// whose Host header is not loopback.
+func (e *Explorer) Handler() http.Handler {
+	mux := http.NewServeMux()
+	e.MountAPI(mux, "/api")
+	MountUI(mux)
+	return e.Wrap(mux)
 }
 
 func (e *Explorer) protect(next http.Handler) http.Handler {

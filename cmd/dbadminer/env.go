@@ -570,6 +570,42 @@ func validateSchema(schema string) error {
 
 var schemaName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// databaseNames parses DBADMINER_DATABASES. An empty value means one database,
+// resolved from DATABASE_URL and the unprefixed variables.
+func databaseNames(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	seen := map[string]struct{}{}
+	var names []string
+	for _, part := range strings.Split(raw, ",") {
+		name := strings.TrimSpace(part)
+		if name == "" || len(name) > 63 || !schemaName.MatchString(name) {
+			return nil, fmt.Errorf("dbadminer: database name %q must be a letter or underscore followed by letters, digits, or underscores", name)
+		}
+		key := strings.ToUpper(name)
+		if _, ok := seen[key]; ok {
+			return nil, fmt.Errorf("dbadminer: duplicate database name %q", name)
+		}
+		seen[key] = struct{}{}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// prefixedGetenv reads NAME_DATABASE_URL as DATABASE_URL and NAME_DB_PASSWORD
+// as DB_PASSWORD. The prefix is the uppercased database name.
+func prefixedGetenv(base func(string) string, name string) func(string) string {
+	prefix := strings.ToUpper(name) + "_"
+	return func(key string) string {
+		if base == nil {
+			return ""
+		}
+		return base(prefix + key)
+	}
+}
+
 func overlayPostgres(dsn string, opts connOptions) (string, error) {
 	if strings.Contains(dsn, "://") {
 		return overlayPostgresURL(dsn, opts)
