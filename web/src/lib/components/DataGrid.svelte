@@ -15,6 +15,15 @@
   const to = $derived(app.grid.offset + (data?.rows.length ?? 0));
   const capped = $derived(data?.limit !== undefined && data.limit < app.grid.limit);
   const basename = $derived(app.selected ? tableKey(app.selected) : "rows");
+  const isView = $derived(!!app.selected && app.selected.type.toLowerCase().includes("view"));
+  const detail = $derived.by(() => {
+    if (!app.selected) return undefined;
+    const key = tableKey(app.selected);
+    return app.schemas.get(key) ?? app.details.get(key);
+  });
+  const canWriteRows = $derived(
+    !app.readOnly && !!app.selected && !isView && (detail?.primaryKey.length ?? 0) > 0,
+  );
 
   function copyCell(value: unknown) {
     if (window.getSelection()?.toString()) return;
@@ -25,6 +34,33 @@
     const kind = cellKind(value);
     if (kind === "number") return "text-right tabular-nums";
     return "text-left";
+  }
+
+  function rowKey(row: unknown[], columns: string[]): Record<string, unknown> | null {
+    const pk = detail?.primaryKey ?? [];
+    if (pk.length === 0) return null;
+    const key: Record<string, unknown> = {};
+    for (const col of pk) {
+      const idx = columns.indexOf(col);
+      if (idx < 0) return null;
+      key[col] = row[idx];
+    }
+    return key;
+  }
+
+  async function deleteRow(row: unknown[], columns: string[]): Promise<void> {
+    if (!app.selected) return;
+    const key = rowKey(row, columns);
+    if (!key) {
+      app.toast("error", "Cannot delete without primary key values");
+      return;
+    }
+    if (!window.confirm("Delete this row?")) return;
+    try {
+      await app.deleteRow(app.selected, key);
+    } catch (err) {
+      app.toast("error", err instanceof Error ? err.message : String(err));
+    }
   }
 </script>
 
@@ -67,6 +103,15 @@
       {app.selected ? tableKey(app.selected) : "No table selected"}
     </h2>
     <div class="ml-auto flex items-center gap-2">
+      {#if canWriteRows && app.selected}
+        <Button
+          variant="outline"
+          size="sm"
+          onclick={() => app.openWrite({ kind: "insert", table: app.selected! })}
+        >
+          Insert
+        </Button>
+      {/if}
       <label class="flex items-center gap-1.5 text-[12px] text-muted-foreground">
         Rows
         <select
@@ -130,12 +175,22 @@
                 </button>
               </th>
             {/each}
+            {#if canWriteRows}
+              <th class="sticky top-0 z-10 border-b border-border bg-surface px-2 py-1.5 text-right font-sans text-[11px] font-medium text-muted-foreground">
+                Actions
+              </th>
+            {/if}
           </tr>
         </thead>
         <tbody>
           {#if data && data.rows.length === 0}
             <tr>
-              <td colspan={(data.columns.length || 0) + 1} class="px-3 py-8 text-center font-sans text-muted-foreground">No rows on this page.</td>
+              <td
+                colspan={(data.columns.length || 0) + 1 + (canWriteRows ? 1 : 0)}
+                class="px-3 py-8 text-center font-sans text-muted-foreground"
+              >
+                No rows on this page.
+              </td>
             </tr>
           {/if}
           {#each data?.rows ?? [] as row, index (index)}
@@ -150,6 +205,31 @@
                   {@render cell(value)}
                 </td>
               {/each}
+              {#if canWriteRows && app.selected && data}
+                <td class="border-b border-border px-2 py-1 text-right font-sans whitespace-nowrap">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onclick={() =>
+                      app.openWrite({
+                        kind: "edit",
+                        table: app.selected!,
+                        row,
+                        columns: data.columns,
+                      })}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="text-danger"
+                    onclick={() => deleteRow(row, data.columns)}
+                  >
+                    Delete
+                  </Button>
+                </td>
+              {/if}
             </tr>
           {/each}
         </tbody>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Eye, Moon, SquareTerminal, Table2, Trash2, RefreshCw } from "@lucide/svelte";
+  import { Eye, Moon, Plus, SquareTerminal, Table2, Trash2, RefreshCw } from "@lucide/svelte";
   import { tableKey, type TableInfo } from "$lib/api";
   import * as Command from "$lib/components/ui/command";
   import { getApp } from "$lib/state.svelte";
@@ -50,6 +50,28 @@
         <SquareTerminal />
         Open SQL
       </Command.Item>
+      {#if !app.readOnly}
+        <Command.Item
+          value="new create table"
+          onSelect={() => {
+            close();
+            app.openWrite({ kind: "create-table" });
+          }}
+        >
+          <Table2 />
+          New table
+        </Command.Item>
+        <Command.Item
+          value="new create view"
+          onSelect={() => {
+            close();
+            app.openWrite({ kind: "create-view" });
+          }}
+        >
+          <Plus />
+          New view
+        </Command.Item>
+      {/if}
       <Command.Item
         value="reload tables"
         onSelect={() => {

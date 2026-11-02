@@ -10,8 +10,8 @@ import (
 
 // Dialect describes one database. Built-in dialects cover PostgreSQL, MySQL,
 // MariaDB, and SQLite. A custom dialect must return the SQL shapes documented
-// on TablesQuery and ColumnsQuery. Index, foreign-key, and DDL methods are
-// left for a later version.
+// on TablesQuery and ColumnsQuery. Schema helpers (indexes, foreign keys, DDL)
+// are implemented beside the built-in dialects in schema.go and ddl.go.
 type Dialect interface {
 	// Name is a short id such as "postgres", "mysql", "mariadb", or "sqlite".
 	Name() string

@@ -39,6 +39,51 @@ export interface TableDetail {
   primaryKey: string[];
 }
 
+export interface IndexInfo {
+  name: string;
+  unique: boolean;
+  columns: string[];
+  primary?: boolean;
+}
+
+export interface ForeignKeyInfo {
+  name: string;
+  columns: string[];
+  refSchema?: string;
+  refTable: string;
+  refColumns: string[];
+  onUpdate?: string;
+  onDelete?: string;
+}
+
+export interface TableSchema extends TableDetail {
+  indexes: IndexInfo[];
+  foreignKeys: ForeignKeyInfo[];
+  ddl?: string;
+}
+
+export interface ColumnDef {
+  name: string;
+  type: string;
+  nullable?: boolean;
+  primaryKey?: boolean;
+  default?: string | null;
+}
+
+export interface AlterOp {
+  op: "add_column" | "drop_column" | "rename_column";
+  name: string;
+  newName?: string;
+  type?: string;
+  nullable?: boolean;
+  default?: string | null;
+}
+
+export interface MutateResult {
+  rowsAffected: number;
+  sql?: string;
+}
+
 export interface ResultSet {
   columns: string[];
   rows: unknown[][];
@@ -99,6 +144,14 @@ function tablePath(schema: string, table: string): string {
   return `${root()}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`;
 }
 
+function json(method: string, body: unknown): RequestInit {
+  return {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+}
+
 export const api = {
   databases: async (): Promise<DatabaseInfo[]> => {
     const res = await fetch("api/databases");
@@ -125,6 +178,8 @@ export const api = {
 
   table: (schema: string, table: string) => request<TableDetail>(tablePath(schema, table)),
 
+  schema: (schema: string, table: string) => request<TableSchema>(`${tablePath(schema, table)}/schema`),
+
   rows(schema: string, table: string, q: RowsQuery) {
     const params = new URLSearchParams({ limit: String(q.limit), offset: String(q.offset) });
     if (q.order) {
@@ -136,11 +191,53 @@ export const api = {
   },
 
   query: (sql: string) =>
-    request<ResultSet>(`${root()}/query`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sql }),
+    request<ResultSet>(`${root()}/query`, json("POST", { sql })),
+
+  createTable: (body: { schema?: string; name: string; columns: ColumnDef[] }) =>
+    request<MutateResult>(`${root()}/tables`, json("POST", body)),
+
+  createView: (body: { schema?: string; name: string; select: string }) =>
+    request<MutateResult>(`${root()}/views`, json("POST", body)),
+
+  alterTable: (schema: string, table: string, ops: AlterOp[]) =>
+    request<MutateResult>(tablePath(schema, table), json("PATCH", { ops })),
+
+  dropTable: (schema: string, table: string, type: "table" | "view" = "table") =>
+    request<MutateResult>(`${tablePath(schema, table)}?type=${type}`, { method: "DELETE" }),
+
+  createIndex: (schema: string, table: string, body: { name: string; unique?: boolean; columns: string[] }) =>
+    request<MutateResult>(`${tablePath(schema, table)}/indexes`, json("POST", body)),
+
+  dropIndex: (schema: string, table: string, name: string) =>
+    request<MutateResult>(`${tablePath(schema, table)}/indexes/${encodeURIComponent(name)}`, { method: "DELETE" }),
+
+  createForeignKey: (
+    schema: string,
+    table: string,
+    body: {
+      name: string;
+      columns: string[];
+      refSchema?: string;
+      refTable: string;
+      refColumns: string[];
+      onUpdate?: string;
+      onDelete?: string;
+    },
+  ) => request<MutateResult>(`${tablePath(schema, table)}/foreign-keys`, json("POST", body)),
+
+  dropForeignKey: (schema: string, table: string, name: string) =>
+    request<MutateResult>(`${tablePath(schema, table)}/foreign-keys/${encodeURIComponent(name)}`, {
+      method: "DELETE",
     }),
+
+  insertRow: (schema: string, table: string, values: Record<string, unknown>) =>
+    request<MutateResult>(`${tablePath(schema, table)}/rows`, json("POST", { values })),
+
+  updateRow: (schema: string, table: string, key: Record<string, unknown>, values: Record<string, unknown>) =>
+    request<MutateResult>(`${tablePath(schema, table)}/rows`, json("PATCH", { key, values })),
+
+  deleteRow: (schema: string, table: string, key: Record<string, unknown>) =>
+    request<MutateResult>(`${tablePath(schema, table)}/rows`, json("DELETE", { key })),
 };
 
 export function tableKey(t: { schema: string; name: string }): string {

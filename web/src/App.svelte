@@ -12,6 +12,7 @@
   import StatusBar from "$lib/components/StatusBar.svelte";
   import StructureView from "$lib/components/StructureView.svelte";
   import TopBar from "$lib/components/TopBar.svelte";
+  import WriteDialogs from "$lib/components/WriteDialogs.svelte";
 
   const app = new AppState();
   setApp(app);
@@ -147,5 +148,6 @@
     <StatusBar />
   </div>
   <CommandPalette />
+  <WriteDialogs />
   <Toaster theme={dark ? "dark" : "light"} />
 </Tooltip.Provider>

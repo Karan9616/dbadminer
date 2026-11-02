@@ -71,19 +71,50 @@
         <span class="ml-1 font-mono font-normal normal-case">{app.tables.length}</span>
       {/if}
     </span>
-    <Tip label="Reload tables">
-      {#snippet children(props)}
-        <button
-          {...props}
-          type="button"
-          aria-label="Reload tables"
-          onclick={() => app.loadTables()}
-          class="grid size-6 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-surface-2 hover:text-foreground"
-        >
-          <RefreshCw class={cn("size-3.5", app.tablesLoading && "animate-spin")} />
-        </button>
-      {/snippet}
-    </Tip>
+    <div class="flex items-center gap-0.5">
+      {#if !app.readOnly}
+        <Tip label="New table">
+          {#snippet children(props)}
+            <button
+              {...props}
+              type="button"
+              aria-label="New table"
+              onclick={() => app.openWrite({ kind: "create-table" })}
+              class="grid size-6 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+            >
+              <Table2 class="size-3.5" />
+            </button>
+          {/snippet}
+        </Tip>
+        <Tip label="New view">
+          {#snippet children(props)}
+            <button
+              {...props}
+              type="button"
+              aria-label="New view"
+              onclick={() => app.openWrite({ kind: "create-view" })}
+              class="grid size-6 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+            >
+              <Eye class="size-3.5" />
+              <span class="sr-only">New view</span>
+            </button>
+          {/snippet}
+        </Tip>
+      {/if}
+      <Tip label="Reload tables">
+        {#snippet children(props)}
+          <button
+            {...props}
+            type="button"
+            aria-label="Reload tables"
+            onclick={() => app.loadTables()}
+            class="grid size-6 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+          >
+            <RefreshCw class={cn("size-3.5", app.tablesLoading && "animate-spin")} />
+          </button>
+        {/snippet}
+      </Tip>
+    </div>
   </div>
 
   <div class="px-2 pb-2">

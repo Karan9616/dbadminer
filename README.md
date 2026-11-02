@@ -70,7 +70,7 @@ dbadminer --readonly=false
 DBADMINER_ACCESS=full
 ```
 
-`--access` takes `readonly` or `full`. The value you type is `readonly`; the README calls that mode read-only. Set only one of `--access` and `--readonly`. Full access still accepts one statement at a time.
+`--access` takes `readonly` or `full`. The value you type is `readonly`; the README calls that mode read-only. Set only one of `--access` and `--readonly`. The SQL console still sends one statement per request; in full access the UI can run a script by splitting and calling `/query` for each statement. Full access also unlocks create/alter/drop table and view dialogs, index and foreign-key actions, and primary-key row insert/update/delete in the data grid. Those write UIs stay hidden in read-only mode and their APIs return 403.
 
 ## Use it as a library
 
@@ -158,21 +158,33 @@ services:
 - `GET /api/databases/{name}/info`
 - `GET /api/databases/{name}/tables`
 - `GET /api/databases/{name}/tables/{schema}/{table}`
+- `GET /api/databases/{name}/tables/{schema}/{table}/schema`
 - `GET /api/databases/{name}/tables/{schema}/{table}/rows?limit&offset&order&dir&count=1`
 - `POST /api/databases/{name}/query` with `{"sql":"select 1"}` and `Content-Type: application/json`
 - `GET /api/info`
 - `GET /api/tables`
 - `GET /api/tables/{schema}/{table}`
+- `GET /api/tables/{schema}/{table}/schema` (columns, indexes, foreign keys, DDL)
 - `GET /api/tables/{schema}/{table}/rows?limit&offset&order&dir&count=1`
 - `POST /api/query` with `{"sql":"select 1"}` and `Content-Type: application/json`
 
+Write routes require full access (`DBADMINER_ACCESS=full`). They return 403 while read-only. The same paths exist under `/api/databases/{name}/…`.
+
+- `POST /api/tables` create table (`schema`, `name`, `columns`)
+- `POST /api/views` create view (`schema`, `name`, `select`)
+- `PATCH /api/tables/{schema}/{table}` alter (`ops`: `add_column`, `drop_column`, `rename_column`)
+- `DELETE /api/tables/{schema}/{table}?type=table|view`
+- `POST|DELETE /api/tables/{schema}/{table}/indexes[/{name}]`
+- `POST|DELETE /api/tables/{schema}/{table}/foreign-keys[/{name}]`
+- `POST|PATCH|DELETE /api/tables/{schema}/{table}/rows` insert / update / delete by primary key
+
 `GET /api/databases` lists `name`, `dialect`, `schema`, `access`, and `readOnly`. It does not include the host, user, or password. With one database the unprefixed routes are the whole API. With several, the unprefixed routes follow the first name in `DBADMINER_DATABASES`.
 
-`count=1` opts into `COUNT(*)`. The page size is capped by `MaxRows`.
+`count=1` opts into `COUNT(*)`. The page size is capped by `MaxRows`. Row edit APIs require a primary key; tables without one stay SQL-console only.
 
 ## Safety
 
-Read-only mode is best effort. Use a database user that only has `SELECT`, and open SQLite with `mode=ro`. DBAdminer also rejects non-read statements, uses a read-only transaction on PostgreSQL, MySQL, and MariaDB, and quotes identifiers only after a catalog match. Full access adds no privileges of its own: the statement runs as the database user, one statement at a time. Details are in [SECURITY.md](SECURITY.md).
+Read-only mode is best effort. Use a database user that only has `SELECT`, and open SQLite with `mode=ro`. DBAdminer also rejects non-read statements, uses a read-only transaction on PostgreSQL, MySQL, and MariaDB, and quotes identifiers only after a catalog match. Full access adds no privileges of its own: statements and structured writes run as the database user. The `/query` endpoint still accepts one statement per request. Details are in [SECURITY.md](SECURITY.md).
 
 ## Tests
 
