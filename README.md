@@ -2,7 +2,7 @@
 
 ![DBAdminer](docs/logo.svg)
 
-![DBAdminer browsing a table](docs/screenshot.png)
+![DBAdminer browsing MySQL shop.customers with tables and routines in the explorer](docs/screenshot.png)
 
 DBAdminer is a database explorer for Go. It starts read-only. Download a binary and open the UI, embed it next to a `*sql.DB` you already have, or pull the Docker image. The library module imports only the standard library. `cmd/dbadminer` is its own module, so importing the library does not pull in database drivers. Handler tests use SQLite. The module requires Go 1.26 or newer.
 
