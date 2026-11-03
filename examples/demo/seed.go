@@ -11,6 +11,8 @@ func seedSQL(driver string) []string {
 
 var postgresSeed = []string{
 	`DROP VIEW IF EXISTS customer_order_totals`,
+	`DROP PROCEDURE IF EXISTS bump_loyalty`,
+	`DROP FUNCTION IF EXISTS customer_label`,
 	`DROP TABLE IF EXISTS order_items`,
 	`DROP TABLE IF EXISTS orders`,
 	`DROP TABLE IF EXISTS products`,
@@ -98,11 +100,32 @@ var postgresSeed = []string{
 		(1, 3, 1, 1800),
 		(2, 2, 1, 520),
 		(3, 1, 3, 450)`,
+	`CREATE OR REPLACE FUNCTION customer_label(p_id BIGINT)
+	RETURNS TEXT
+	LANGUAGE sql
+	STABLE
+	AS $$
+		SELECT email || ' (' || name || ')'
+		FROM customers
+		WHERE id = p_id
+	$$`,
+	`CREATE OR REPLACE PROCEDURE bump_loyalty(p_id BIGINT, p_delta INTEGER)
+	LANGUAGE plpgsql
+	AS $$
+	BEGIN
+		UPDATE customers
+		SET loyalty_points = loyalty_points + p_delta,
+		    updated_at = NOW()
+		WHERE id = p_id;
+	END;
+	$$`,
 }
 
 var mysqlSeed = []string{
 	`SET FOREIGN_KEY_CHECKS=0`,
 	`DROP VIEW IF EXISTS customer_order_totals`,
+	`DROP PROCEDURE IF EXISTS bump_loyalty`,
+	`DROP FUNCTION IF EXISTS customer_label`,
 	`DROP TABLE IF EXISTS order_items`,
 	`DROP TABLE IF EXISTS orders`,
 	`DROP TABLE IF EXISTS products`,
@@ -206,4 +229,21 @@ var mysqlSeed = []string{
 		(1, 3, 1, 1800),
 		(2, 2, 1, 520),
 		(3, 1, 3, 450)`,
+	`CREATE FUNCTION customer_label(p_id BIGINT)
+	RETURNS VARCHAR(512)
+	DETERMINISTIC
+	READS SQL DATA
+	BEGIN
+		DECLARE v_label VARCHAR(512);
+		SELECT CONCAT(email, ' (', name, ')') INTO v_label
+		FROM customers
+		WHERE id = p_id;
+		RETURN v_label;
+	END`,
+	`CREATE PROCEDURE bump_loyalty(IN p_id BIGINT, IN p_delta INT)
+	BEGIN
+		UPDATE customers
+		SET loyalty_points = loyalty_points + p_delta
+		WHERE id = p_id;
+	END`,
 }

@@ -120,6 +120,8 @@ func (e *Explorer) MountAPI(mux *http.ServeMux, base string) {
 	base = strings.TrimRight(base, "/")
 	mux.HandleFunc("GET "+base+"/info", e.handleInfo)
 	mux.HandleFunc("GET "+base+"/tables", e.handleTables)
+	mux.HandleFunc("GET "+base+"/routines", e.handleRoutines)
+	mux.HandleFunc("GET "+base+"/routines/{schema}/{name}", e.handleRoutine)
 	mux.HandleFunc("POST "+base+"/tables", e.handleCreateTable)
 	mux.HandleFunc("POST "+base+"/views", e.handleCreateView)
 	mux.HandleFunc("GET "+base+"/tables/{schema}/{table}/schema", e.handleSchema)

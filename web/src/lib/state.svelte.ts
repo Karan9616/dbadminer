@@ -3,6 +3,7 @@ import { SvelteMap } from "svelte/reactivity";
 import { toast as notify } from "svelte-sonner";
 import {
   api,
+  routineKey,
   setDatabase,
   tableKey,
   type AlterOp,
@@ -10,6 +11,8 @@ import {
   type DatabaseInfo,
   type Info,
   type ResultSet,
+  type RoutineDetail,
+  type RoutineInfo,
   type TableDetail,
   type TableInfo,
   type TableSchema,
@@ -132,13 +135,17 @@ export class AppState {
   database = $state("");
   info = $state.raw<Info | null>(null);
   tables = $state.raw<TableInfo[]>([]);
+  routines = $state.raw<RoutineInfo[]>([]);
   tablesLoading = $state(true);
   tablesError = $state<string | null>(null);
   selected = $state.raw<TableInfo | null>(null);
+  selectedRoutine = $state.raw<RoutineInfo | null>(null);
   view = $state<View>("data");
   details = new SvelteMap<string, TableDetail>();
   schemas = new SvelteMap<string, TableSchema>();
   detailErrors = new SvelteMap<string, string>();
+  routineDetails = new SvelteMap<string, RoutineDetail>();
+  routineErrors = new SvelteMap<string, string>();
   grid = new GridState();
   sql = new SqlState();
   rowChanges = new RowChanges();
@@ -190,6 +197,7 @@ export class AppState {
     this.history = loadHistory(name);
     if (reset) {
       this.selected = null;
+      this.selectedRoutine = null;
       this.grid.reset();
       this.rowChanges.bindScope(name, "");
       this.rowChanges.clear();
@@ -200,7 +208,10 @@ export class AppState {
       this.details.clear();
       this.schemas.clear();
       this.detailErrors.clear();
+      this.routineDetails.clear();
+      this.routineErrors.clear();
       this.tables = [];
+      this.routines = [];
     }
     try {
       this.info = await api.info();
@@ -215,7 +226,13 @@ export class AppState {
     this.tablesLoading = true;
     this.tablesError = null;
     try {
-      this.tables = await api.tables();
+      const [tables, routines] = await Promise.all([api.tables(), api.routines()]);
+      this.tables = tables;
+      this.routines = routines;
+      if (this.selectedRoutine) {
+        const still = routines.some((r) => routineKey(r) === routineKey(this.selectedRoutine!));
+        if (!still) this.selectedRoutine = null;
+      }
       await this.#restoreSelectedTable();
     } catch (err) {
       this.tablesError = message(err);
@@ -242,12 +259,55 @@ export class AppState {
   }
 
   async selectTable(table: TableInfo, view: View = this.view === "sql" ? "data" : this.view): Promise<void> {
+    this.selectedRoutine = null;
     this.selected = table;
     this.view = view;
     saveSelectedTable(this.database, table);
     this.grid.reset();
     this.rowChanges.bindScope(this.database, tableKey(table));
     await Promise.all([this.loadRows(), this.loadDetail(table), this.loadSchema(table)]);
+  }
+
+  async selectRoutine(routine: RoutineInfo): Promise<void> {
+    this.selected = null;
+    this.selectedRoutine = routine;
+    this.view = "structure";
+    saveSelectedTable(this.database, null);
+    this.grid.reset();
+    this.rowChanges.bindScope(this.database, "");
+    this.rowChanges.clear();
+    await this.loadRoutine(routine);
+  }
+
+  async loadRoutine(routine: RoutineInfo): Promise<RoutineDetail | undefined> {
+    const key = routineKey(routine);
+    this.routineErrors.delete(key);
+    try {
+      const detail = await api.routine(routine.schema, routine.name, routine.type, routine.identityArgs);
+      this.routineDetails.set(key, detail);
+      return detail;
+    } catch (err) {
+      this.routineErrors.set(key, message(err));
+      this.toast("error", message(err));
+      return undefined;
+    }
+  }
+
+  openRoutineInSql(routine?: RoutineInfo | null): void {
+    routine ??= this.selectedRoutine;
+    if (!routine) return;
+    const q = this.info?.dialect === "postgres" ? '"' : "`";
+    const qual = `${q}${routine.schema}${q}.${q}${routine.name}${q}`;
+    const params = this.routineDetails.get(routineKey(routine))?.parameters ?? [];
+    const placeholders = params
+      .filter((p) => !p.mode || p.mode.toUpperCase() === "IN" || p.mode.toUpperCase() === "INOUT")
+      .map((p) => (p.name ? `/* ${p.name} ${p.dataType} */ NULL` : "NULL"))
+      .join(", ");
+    const sql =
+      routine.type === "function"
+        ? `SELECT ${qual}(${placeholders});`
+        : `CALL ${qual}(${placeholders});`;
+    this.openSql(sql);
   }
 
   async loadRows(): Promise<void> {
@@ -571,7 +631,16 @@ export class AppState {
   }
 
   openSql(text?: string): void {
-    if (text !== undefined) this.sql.text = text;
+    if (text !== undefined) {
+      this.sql.text = text;
+      this.view = "sql";
+      return;
+    }
+    // Top-bar SQL is global — toggle back to the object view when already open.
+    if (this.view === "sql") {
+      this.view = this.selectedRoutine ? "structure" : "data";
+      return;
+    }
     this.view = "sql";
   }
 

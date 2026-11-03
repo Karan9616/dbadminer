@@ -23,6 +23,27 @@ export interface TableInfo {
   type: string;
 }
 
+export interface RoutineInfo {
+  schema: string;
+  name: string;
+  type: "procedure" | "function" | (string & {});
+  language?: string;
+  returnType?: string;
+  identityArgs?: string;
+}
+
+export interface RoutineParam {
+  name: string;
+  mode?: string;
+  dataType: string;
+  position: number;
+}
+
+export interface RoutineDetail extends RoutineInfo {
+  parameters: RoutineParam[];
+  definition: string;
+}
+
 export interface ColumnInfo {
   name: string;
   type: string;
@@ -176,6 +197,16 @@ export const api = {
 
   tables: async () => (await request<{ tables: TableInfo[] }>(`${root()}/tables`)).tables ?? [],
 
+  routines: async () => (await request<{ routines: RoutineInfo[] }>(`${root()}/routines`)).routines ?? [],
+
+  routine: (schema: string, name: string, type: string, args?: string) => {
+    const params = new URLSearchParams({ type });
+    if (args) params.set("args", args);
+    return request<RoutineDetail>(
+      `${root()}/routines/${encodeURIComponent(schema)}/${encodeURIComponent(name)}?${params}`,
+    );
+  },
+
   table: (schema: string, table: string) => request<TableDetail>(tablePath(schema, table)),
 
   schema: (schema: string, table: string) => request<TableSchema>(`${tablePath(schema, table)}/schema`),
@@ -242,4 +273,9 @@ export const api = {
 
 export function tableKey(t: { schema: string; name: string }): string {
   return `${t.schema}.${t.name}`;
+}
+
+export function routineKey(r: RoutineInfo): string {
+  const args = r.identityArgs ? `(${r.identityArgs})` : "";
+  return `${r.schema}.${r.name}${args}:${r.type}`;
 }

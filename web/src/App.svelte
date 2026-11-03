@@ -8,6 +8,7 @@
   import { cn } from "$lib/utils";
   import CommandPalette from "$lib/components/CommandPalette.svelte";
   import DataGrid from "$lib/components/DataGrid.svelte";
+  import RoutineView from "$lib/components/RoutineView.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import SqlEditor from "$lib/components/SqlEditor.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
@@ -183,24 +184,43 @@
         {/if}
       {/if}
       <main class="flex min-w-0 flex-1 flex-col">
-        <Tabs.Root bind:value={app.view} class="min-h-0 flex-1 gap-0">
-          <div class="flex items-center border-b border-border px-2">
-            <Tabs.List variant="line" class="h-9 bg-transparent">
-              <Tabs.Trigger value="data">Data</Tabs.Trigger>
-              <Tabs.Trigger value="structure">Structure</Tabs.Trigger>
-              <Tabs.Trigger value="sql">SQL</Tabs.Trigger>
-            </Tabs.List>
-          </div>
-          <Tabs.Content value="data" class="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-            <DataGrid />
-          </Tabs.Content>
-          <Tabs.Content value="structure" class="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-            <StructureView />
-          </Tabs.Content>
-          <Tabs.Content value="sql" class="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
+        {#if app.view === "sql"}
+          <div class="min-h-0 flex-1 flex flex-col">
             <SqlEditor />
-          </Tabs.Content>
-        </Tabs.Root>
+          </div>
+        {:else}
+          <Tabs.Root bind:value={app.view} class="min-h-0 flex-1 gap-0">
+            <div class="flex items-center border-b border-border px-2">
+              <Tabs.List variant="line" class="h-9 bg-transparent">
+                <Tabs.Trigger value="data">Data</Tabs.Trigger>
+                <Tabs.Trigger value="structure">Structure</Tabs.Trigger>
+              </Tabs.List>
+            </div>
+            <Tabs.Content value="data" class="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
+              {#if app.selectedRoutine}
+                <div class="grid flex-1 place-items-center gap-2 p-6 text-center text-muted-foreground">
+                  <p>Routines have no row data.</p>
+                  <button
+                    type="button"
+                    class="cursor-pointer text-primary underline-offset-2 hover:underline"
+                    onclick={() => (app.view = "structure")}
+                  >
+                    View definition
+                  </button>
+                </div>
+              {:else}
+                <DataGrid />
+              {/if}
+            </Tabs.Content>
+            <Tabs.Content value="structure" class="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
+              {#if app.selectedRoutine}
+                <RoutineView />
+              {:else}
+                <StructureView />
+              {/if}
+            </Tabs.Content>
+          </Tabs.Root>
+        {/if}
       </main>
     </div>
     <StatusBar />
