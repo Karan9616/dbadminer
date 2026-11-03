@@ -154,10 +154,13 @@ jobs:
         include:
           - name: mysql 8
             image: mysql:8
+            health: mysqladmin ping -h 127.0.0.1 -uroot -proot
           - name: mariadb 10
             image: mariadb:10
+            health: healthcheck.sh --connect --innodb_initialized
           - name: mariadb 11
             image: mariadb:11
+            health: healthcheck.sh --connect --innodb_initialized
     services:
       mysql:
         image: ${{ matrix.image }}
@@ -173,7 +176,7 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-cmd "${{ matrix.health }}"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 30

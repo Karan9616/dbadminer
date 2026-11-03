@@ -763,9 +763,9 @@ func splitMySQLDSN(dsn string) (user, pass, host, port, dbName string, params ur
 		return "", "", "", "", "", nil, errors.New("dbadminer: cannot apply DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, or DB_NAME to this MySQL DSN")
 	}
 	addr := rest[len("tcp("):end]
-	host, port, err = net.SplitHostPort(addr)
-	if err != nil {
-		host, port, err = addr, "", nil
+	host, port, splitErr := net.SplitHostPort(addr)
+	if splitErr != nil {
+		host, port = addr, ""
 	}
 	dbName = strings.TrimPrefix(rest[end+1:], "/")
 	if userinfo != "" {

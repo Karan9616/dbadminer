@@ -26,13 +26,13 @@ type createViewReq struct {
 }
 
 type alterOp struct {
-	Op        string  `json:"op"`
-	Name      string  `json:"name,omitempty"`
-	NewName   string  `json:"newName,omitempty"`
-	Type      string  `json:"type,omitempty"`
-	Nullable  *bool   `json:"nullable,omitempty"`
-	Default   *string `json:"default,omitempty"`
-	DropDefault bool  `json:"dropDefault,omitempty"`
+	Op          string  `json:"op"`
+	Name        string  `json:"name,omitempty"`
+	NewName     string  `json:"newName,omitempty"`
+	Type        string  `json:"type,omitempty"`
+	Nullable    *bool   `json:"nullable,omitempty"`
+	Default     *string `json:"default,omitempty"`
+	DropDefault bool    `json:"dropDefault,omitempty"`
 }
 
 type alterTableReq struct {
@@ -129,9 +129,6 @@ func createTableSQL(d Dialect, schema, table string, cols []columnDef) (string, 
 		}
 		if col.PrimaryKey {
 			pkCols = append(pkCols, col.Name)
-			if d.Name() != "sqlite" || len(pkCols) > 1 {
-				// single-column PK can be inline; multi handled below
-			}
 		}
 		parts = append(parts, part)
 	}
