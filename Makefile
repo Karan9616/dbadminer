@@ -2,7 +2,7 @@
 
 GO_TOOL := go tool -modfile=$(CURDIR)/tools/go.mod
 DATABASE_URL ?= postgres://dbadminer:dbadminer@127.0.0.1:5432/dbadminer?sslmode=disable
-MODULES := cmd/dbadminer examples/http examples/chi examples/cobra
+MODULES := cmd/dbadminer examples/http examples/chi examples/cobra examples/demo
 
 .PHONY: check fmt vet lint test vuln tidy integration ui ui-check
 

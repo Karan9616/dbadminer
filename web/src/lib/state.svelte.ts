@@ -14,6 +14,8 @@ import {
   type TableInfo,
   type TableSchema,
 } from "./api";
+import { normalizeWriteValues } from "./insert-suggest";
+import { RowChanges } from "./row-changes.svelte";
 import { splitStatements } from "./sql-split";
 import { applyTheme, loadThemePreference, saveThemePreference, type ThemePreference } from "./theme";
 
@@ -40,12 +42,38 @@ export interface HistoryEntry {
 
 const HISTORY_KEY = "dbadminer:history";
 const DATABASE_KEY = "dbadminer:database";
+const TABLE_KEY = "dbadminer:table";
 const PAGE_SIZE_KEY = "dbadminer:page-size";
 const HISTORY_MAX = 50;
 export const PAGE_SIZES = [25, 50, 100, 200] as const;
 
 function historyKey(name: string): string {
   return name ? `${HISTORY_KEY}:${name}` : HISTORY_KEY;
+}
+
+function tableStorageKey(database: string): string {
+  return database ? `${TABLE_KEY}:${database}` : TABLE_KEY;
+}
+
+function loadSavedTable(database: string): { schema: string; name: string } | null {
+  try {
+    const raw = JSON.parse(localStorage.getItem(tableStorageKey(database)) ?? "null");
+    if (raw && typeof raw.schema === "string" && typeof raw.name === "string") {
+      return { schema: raw.schema, name: raw.name };
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function saveSelectedTable(database: string, table: TableInfo | null): void {
+  const key = tableStorageKey(database);
+  if (!table) {
+    localStorage.removeItem(key);
+    return;
+  }
+  localStorage.setItem(key, JSON.stringify({ schema: table.schema, name: table.name }));
 }
 
 function loadHistory(name = ""): HistoryEntry[] {
@@ -113,6 +141,7 @@ export class AppState {
   detailErrors = new SvelteMap<string, string>();
   grid = new GridState();
   sql = new SqlState();
+  rowChanges = new RowChanges();
   history = $state.raw<HistoryEntry[]>(loadHistory());
   theme = $state<ThemePreference>(loadThemePreference());
   paletteOpen = $state(false);
@@ -162,6 +191,8 @@ export class AppState {
     if (reset) {
       this.selected = null;
       this.grid.reset();
+      this.rowChanges.bindScope(name, "");
+      this.rowChanges.clear();
       this.sql.result = null;
       this.sql.results = [];
       this.sql.error = null;
@@ -185,6 +216,7 @@ export class AppState {
     this.tablesError = null;
     try {
       this.tables = await api.tables();
+      await this.#restoreSelectedTable();
     } catch (err) {
       this.tablesError = message(err);
       this.toast("error", this.tablesError);
@@ -193,10 +225,28 @@ export class AppState {
     }
   }
 
+  async #restoreSelectedTable(): Promise<void> {
+    if (this.selected) {
+      const stillThere = this.tables.some(
+        (t) => t.schema === this.selected!.schema && t.name === this.selected!.name,
+      );
+      if (stillThere) return;
+      this.selected = null;
+      saveSelectedTable(this.database, null);
+    }
+    const saved = loadSavedTable(this.database);
+    if (!saved) return;
+    const match = this.tables.find((t) => t.schema === saved.schema && t.name === saved.name);
+    if (match) await this.selectTable(match, this.view === "sql" ? "data" : this.view);
+    else saveSelectedTable(this.database, null);
+  }
+
   async selectTable(table: TableInfo, view: View = this.view === "sql" ? "data" : this.view): Promise<void> {
     this.selected = table;
     this.view = view;
+    saveSelectedTable(this.database, table);
     this.grid.reset();
+    this.rowChanges.bindScope(this.database, tableKey(table));
     await Promise.all([this.loadRows(), this.loadDetail(table), this.loadSchema(table)]);
   }
 
@@ -220,12 +270,59 @@ export class AppState {
       g.data = data;
       g.durationMs = performance.now() - started;
       if (typeof data.total === "number") g.total = data.total;
+      this.rowChanges.selectedRowIds.clear();
     } catch (err) {
       if (seq !== this.#rowsSeq) return;
       g.error = message(err);
       this.toast("error", g.error);
     } finally {
       if (seq === this.#rowsSeq) g.loading = false;
+    }
+  }
+
+  async navigateRows(action: () => void | Promise<void>): Promise<void> {
+    // Pending ops are persisted per table and keyed by PK; keep them across page/sort.
+    this.rowChanges.selectedRowIds.clear();
+    await action();
+  }
+
+  async applyRowChanges(): Promise<void> {
+    const table = this.selected;
+    if (!table || this.rowChanges.applying) return;
+    const key = tableKey(table);
+    const detail = this.schemas.get(key) ?? this.details.get(key);
+    const columns = this.grid.data?.columns ?? detail?.columns.map((c) => c.name) ?? [];
+    const pk = detail?.primaryKey ?? [];
+    const actions = this.rowChanges.buildApplyActions(columns, pk);
+    if (actions.length === 0) {
+      this.rowChanges.clear();
+      return;
+    }
+    const colInfos = detail?.columns ?? [];
+    this.rowChanges.applying = true;
+    try {
+      for (const action of actions) {
+        if (action.kind === "insert") {
+          await api.insertRow(table.schema, table.name, normalizeWriteValues(action.values, colInfos));
+        } else if (action.kind === "update") {
+          await api.updateRow(
+            table.schema,
+            table.name,
+            action.key,
+            normalizeWriteValues(action.values, colInfos),
+          );
+        } else {
+          await api.deleteRow(table.schema, table.name, action.key);
+        }
+      }
+      this.toast("success", `Applied ${actions.length} change${actions.length === 1 ? "" : "s"}`);
+      this.rowChanges.clear();
+      await this.loadRows();
+    } catch (err) {
+      this.toast("error", message(err));
+      await this.loadRows();
+    } finally {
+      this.rowChanges.applying = false;
     }
   }
 
@@ -266,37 +363,45 @@ export class AppState {
   }
 
   sortBy(column: string): void {
-    const g = this.grid;
-    if (g.order === column) {
-      if (g.dir === "asc") g.dir = "desc";
-      else {
-        g.order = "";
+    void this.navigateRows(() => {
+      const g = this.grid;
+      if (g.order === column) {
+        if (g.dir === "asc") g.dir = "desc";
+        else {
+          g.order = "";
+          g.dir = "asc";
+        }
+      } else {
+        g.order = column;
         g.dir = "asc";
       }
-    } else {
-      g.order = column;
-      g.dir = "asc";
-    }
-    g.offset = 0;
-    void this.loadRows();
+      g.offset = 0;
+      return this.loadRows();
+    });
   }
 
   setPage(offset: number): void {
-    this.grid.offset = Math.max(0, offset);
-    void this.loadRows();
+    void this.navigateRows(() => {
+      this.grid.offset = Math.max(0, offset);
+      return this.loadRows();
+    });
   }
 
   setPageSize(limit: number): void {
-    this.grid.limit = limit;
-    this.grid.offset = 0;
-    localStorage.setItem(PAGE_SIZE_KEY, String(limit));
-    void this.loadRows();
+    void this.navigateRows(() => {
+      this.grid.limit = limit;
+      this.grid.offset = 0;
+      localStorage.setItem(PAGE_SIZE_KEY, String(limit));
+      return this.loadRows();
+    });
   }
 
   toggleCount(): void {
-    this.grid.wantCount = !this.grid.wantCount;
-    if (!this.grid.wantCount) this.grid.total = null;
-    void this.loadRows();
+    void this.navigateRows(() => {
+      this.grid.wantCount = !this.grid.wantCount;
+      if (!this.grid.wantCount) this.grid.total = null;
+      return this.loadRows();
+    });
   }
 
   async runSql(sql: string = this.sql.text): Promise<void> {
@@ -383,6 +488,8 @@ export class AppState {
     if (this.selected && tableKey(this.selected) === tableKey(table)) {
       this.selected = null;
       this.grid.reset();
+      this.rowChanges.clear();
+      saveSelectedTable(this.database, null);
     }
     this.invalidateTable(table);
     await this.loadTables();

@@ -63,7 +63,7 @@
   }
 </script>
 
-<aside class="flex h-full min-h-0 flex-col bg-surface">
+<aside class="flex h-full min-h-0 w-full min-w-0 flex-col bg-surface">
   <div class="flex h-9 shrink-0 items-center justify-between px-3">
     <span class="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
       Explorer

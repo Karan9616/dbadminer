@@ -1,0 +1,89 @@
+# Demo stack: seed sample data, run a hello-world app, open full-access DBAdminer.
+# From the repo root:
+#   docker compose -f examples/demo/compose.yaml up --build
+# Then open:
+#   http://127.0.0.1:8090  demo hello-world app
+#   http://127.0.0.1:8080  DBAdminer
+#
+# Or from this directory:
+#   docker compose up --build
+
+name: dbadminer-demo
+
+x-db-env: &db-env
+  DEMO_DATABASES: shop,app
+  SHOP_DATABASE_URL: mysql://mysql:3306/shop
+  SHOP_DB_USER: dbadminer
+  SHOP_DB_PASSWORD: dbadminer
+  APP_DATABASE_URL: postgres://postgres:5432/app?sslmode=disable
+  APP_DB_USER: dbadminer
+  APP_DB_PASSWORD: dbadminer
+  APP_DB_SCHEMA: public
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: dbadminer
+      POSTGRES_PASSWORD: dbadminer
+      POSTGRES_DB: app
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbadminer -d app"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  mysql:
+    image: mysql:9
+    environment:
+      MYSQL_USER: dbadminer
+      MYSQL_PASSWORD: dbadminer
+      MYSQL_DATABASE: shop
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  seed:
+    build: .
+    command: ["seed"]
+    environment:
+      <<: *db-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build: .
+    command: ["serve"]
+    environment:
+      <<: *db-env
+      DEMO_ADDR: ":8090"
+    ports:
+      - "127.0.0.1:8090:8090"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+
+  dbadminer:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      <<: *db-env
+      DBADMINER_ACCESS: full
+      DBADMINER_DATABASES: shop,app
+    depends_on:
+      seed:
+        condition: service_completed_successfully

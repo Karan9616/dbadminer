@@ -152,6 +152,14 @@ services:
 
 `.env` holds the same `DBADMINER_DATABASES` and prefixed lines. The service then uses `env_file: .env` instead of `environment`. The page shows a database switcher when more than one name is configured. `GET /api/info` and the other unprefixed routes use the first name. `--dsn` cannot be combined with `DBADMINER_DATABASES`.
 
+For a ready-made full-access stack with a tiny hello-world app and seeded Postgres/MySQL, see [examples/demo](examples/demo):
+
+```bash
+docker compose -f examples/demo/compose.yaml up --build
+```
+
+Open http://127.0.0.1:8090 for the demo app and http://127.0.0.1:8080 for DBAdminer.
+
 ## HTTP API
 
 - `GET /api/databases`
