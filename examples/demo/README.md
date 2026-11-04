@@ -5,7 +5,7 @@ Small Go app with two commands:
 - `seed` — create sample tables and rows in Postgres and MySQL
 - `serve` — hello-world HTTP page that reads those databases
 
-Compose starts the databases, runs seed, then runs the app and full-access DBAdminer.
+Compose starts the databases, runs seed, then runs the app and full-access DBAdminer (built from this repo). For the published image alone, use [`dbadminer/dbadminer`](https://hub.docker.com/r/dbadminer/dbadminer) as in the root [README](../../README.md#run-the-docker-image).
 
 ```bash
 # from the repo root
@@ -17,7 +17,7 @@ docker compose -f examples/demo/compose.yaml up --build
 | http://127.0.0.1:8090 | Demo hello-world app |
 | http://127.0.0.1:8080 | DBAdminer (`shop` = MySQL, `app` = Postgres) |
 
-Each database gets `customers`, `products`, `orders`, `order_items`, and a `customer_order_totals` view.
+Each database gets `customers`, `products`, `orders`, `order_items`, `sample_docs` (long text, JSON, arrays, blobs), and a `customer_order_totals` view.
 
 Re-seed:
 

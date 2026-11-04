@@ -104,17 +104,19 @@ Flags accepted by `Flags` and `Run`: `--addr`, `--access`, `--readonly`, `--user
 
 ## Run the Docker image
 
-A tag named `v*` publishes `docker.io/<Docker Hub user>/dbadminer` for that version and for `latest`. The Docker Hub user comes from the `DOCKERHUB_USERNAME` Actions secret. You can also build it locally, publish the port only on the host loopback, then open `http://127.0.0.1:8080`:
+Version tags (`v*`) publish [dbadminer/dbadminer](https://hub.docker.com/r/dbadminer/dbadminer) for that version and for `latest`. Pull the image, publish the port only on the host loopback, then open `http://127.0.0.1:8080`:
 
 ```bash
-docker build -t dbadminer .
+docker pull dbadminer/dbadminer:latest
 docker run --rm -p 127.0.0.1:8080:8080 \
   -e DATABASE_URL='postgres://postgres:5432/app?sslmode=disable' \
   -e DB_USER=ada \
   -e DB_PASSWORD='p@ss' \
   -e DB_SCHEMA=public \
-  dbadminer
+  dbadminer/dbadminer:latest
 ```
+
+To build from this repository instead: `docker build -t dbadminer .` and run the local tag the same way.
 
 The image starts read-only. Add `-e DBADMINER_ACCESS=full` when the database user should be allowed to run DML and DDL.
 
@@ -136,7 +138,7 @@ services:
       MYSQL_DATABASE: shop
       MYSQL_ROOT_PASSWORD: root
   dbadminer:
-    image: docker.io/<user>/dbadminer:latest
+    image: dbadminer/dbadminer:latest
     ports:
       - "127.0.0.1:8080:8080"
     environment:

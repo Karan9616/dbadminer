@@ -30,3 +30,7 @@ npm run dev
 ```
 
 `npm run dev` serves the page with Vite and proxies `api` to `http://127.0.0.1:8080`. Start DBAdminer on that address first. `make ui-check` runs `svelte-check` and the production build. `make ui` only rebuilds `ui/`.
+
+## Releases
+
+Pushing a `v*` tag runs the Release workflow: GoReleaser publishes GitHub Release binaries, and the Docker job pushes [`dbadminer/dbadminer`](https://hub.docker.com/r/dbadminer/dbadminer) for that version and `latest`. Login uses the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` Actions secrets.

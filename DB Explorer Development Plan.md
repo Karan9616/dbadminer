@@ -122,7 +122,7 @@ Everything else stays unexported or under `internal/` until it has proven itself
 - [ ] Build with `CGO_ENABLED=0` for linux/darwin/windows on amd64 and arm64
 - [ ] `.goreleaser.yaml`: archives, checksums, SBOM, version injected via ldflags
 - [ ] GitHub Actions release workflow triggered by tags
-- [ ] Optional: Homebrew tap, Scoop bucket, Docker image
+- [x] Optional: Homebrew tap, Scoop bucket, Docker image (`dbadminer/dbadminer` on Docker Hub)
 - [ ] Sign macOS binaries or document the Gatekeeper workaround
 
 **Exit criteria:** `curl` or `brew install` followed by `<name> postgres://...` opens the UI on all three operating systems.

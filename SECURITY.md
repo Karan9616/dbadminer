@@ -24,6 +24,6 @@ For SQLite, open the file with `mode=ro` (DBAdminer does this when it connects f
 
 Database passwords from `DATABASE_URL`, `PGPASSWORD`, `MYSQL_PASSWORD`, and `DB_PASSWORD` are used only to connect. They are not the explorer's basic-auth password. Set `--user` and `--password` if the page itself should require a login.
 
-The Docker image listens on `0.0.0.0:8080` inside the container. Publish that port on the host loopback (`-p 127.0.0.1:8080:8080`). Do not publish it on a public interface. The Host check still rejects a request whose `Host` is not loopback.
+The published image is [`dbadminer/dbadminer`](https://hub.docker.com/r/dbadminer/dbadminer). It listens on `0.0.0.0:8080` inside the container. Publish that port on the host loopback (`-p 127.0.0.1:8080:8080`). Do not publish it on a public interface. The Host check still rejects a request whose `Host` is not loopback.
 
 Dependency review runs in CI with `govulncheck` and Dependabot.
