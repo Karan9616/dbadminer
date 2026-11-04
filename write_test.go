@@ -183,3 +183,58 @@ func TestMutateResultJSON(t *testing.T) {
 		t.Fatal(string(b))
 	}
 }
+
+func TestBindSQLArgJSONAndArray(t *testing.T) {
+	obj, err := bindSQLArg("JSONB", map[string]any{"ok": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, ok := obj.(json.RawMessage)
+	if !ok || string(raw) != `{"ok":true}` {
+		t.Fatalf("json arg = %#v", obj)
+	}
+
+	arr, err := bindSQLArg("ARRAY", []any{"a", "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	strs, ok := arr.([]string)
+	if !ok || len(strs) != 2 || strs[0] != "a" || strs[1] != "b" {
+		t.Fatalf("array arg = %#v", arr)
+	}
+
+	jsonArr, err := bindSQLArg("JSON", []any{1, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, ok = jsonArr.(json.RawMessage)
+	if !ok || string(raw) != `[1,2]` {
+		t.Fatalf("json array arg = %#v", jsonArr)
+	}
+}
+
+func TestUpdateRowJSONObject(t *testing.T) {
+	db := openMem(t)
+	execSQL(t, db, `CREATE TABLE docs (id INTEGER PRIMARY KEY, meta TEXT NOT NULL)`)
+	execSQL(t, db, `INSERT INTO docs (id, meta) VALUES (1, '{}')`)
+	cfg := DefaultConfig()
+	cfg.Access = AccessFull
+	ex, err := New(db, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := ex.Handler()
+	body := `{"key":{"id":1},"values":{"meta":{"kind":"edge","empty":{}}}}`
+	rr := doRequest(h, http.MethodPatch, "/api/tables/main/docs/rows", strings.NewReader(body), "application/json")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update %d %s", rr.Code, rr.Body.String())
+	}
+	rows := getRows(t, h, "main", "docs", "limit=10&offset=0")
+	if len(rows.Rows) != 1 {
+		t.Fatalf("rows %+v", rows)
+	}
+	meta := fmt.Sprint(rows.Rows[0][1])
+	if !strings.Contains(meta, "edge") {
+		t.Fatalf("meta = %#v", rows.Rows[0][1])
+	}
+}

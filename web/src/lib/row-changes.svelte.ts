@@ -101,7 +101,7 @@ export function editInputText(value: unknown): string {
   if (value === null || value === undefined) return "";
   const temporal = formatTemporalForEdit(value);
   if (temporal !== null) return temporal;
-  if (typeof value === "object") return JSON.stringify(value);
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
   return String(value);
 }
 

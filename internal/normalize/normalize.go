@@ -123,6 +123,16 @@ const (
 // IsJSON reports whether typeName is JSON or JSONB.
 func IsJSON(typeName string) bool { return classifyType(typeName) == kindJSON }
 
+// IsArray reports whether typeName looks like a SQL array (Postgres ARRAY / _text / text[]).
+func IsArray(typeName string) bool {
+	u := strings.ToUpper(strings.TrimSpace(typeName))
+	if u == "ARRAY" {
+		return true
+	}
+	_, ok := pgArrayElementType(typeName)
+	return ok
+}
+
 func classifyType(typeName string) typeKind {
 	switch strings.ToUpper(strings.TrimSpace(typeName)) {
 	case "JSON", "JSONB":

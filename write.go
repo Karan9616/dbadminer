@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/dbadminer/dbadminer/internal/guard"
+	"github.com/dbadminer/dbadminer/internal/normalize"
 )
 
 type mutateResult struct {
@@ -481,18 +485,23 @@ func mapValues(cols []columnInfo, values map[string]any, requireAll bool) ([]str
 	if values == nil {
 		return nil, nil, &httpError{status: http.StatusBadRequest, msg: "values are required"}
 	}
-	known := map[string]struct{}{}
+	byName := make(map[string]columnInfo, len(cols))
 	for _, c := range cols {
-		known[c.Name] = struct{}{}
+		byName[c.Name] = c
 	}
 	names := make([]string, 0, len(values))
 	args := make([]any, 0, len(values))
 	for name, val := range values {
-		if _, ok := known[name]; !ok {
+		col, ok := byName[name]
+		if !ok {
 			return nil, nil, &httpError{status: http.StatusBadRequest, msg: "unknown column: " + name}
 		}
+		bound, err := bindSQLArg(col.Type, val)
+		if err != nil {
+			return nil, nil, &httpError{status: http.StatusBadRequest, msg: name + ": " + err.Error()}
+		}
 		names = append(names, name)
-		args = append(args, val)
+		args = append(args, bound)
 	}
 	if len(names) == 0 {
 		return nil, nil, &httpError{status: http.StatusBadRequest, msg: "values are required"}
@@ -501,6 +510,130 @@ func mapValues(cols []columnInfo, values map[string]any, requireAll bool) ([]str
 		return nil, nil, &httpError{status: http.StatusBadRequest, msg: "all columns are required"}
 	}
 	return names, args, nil
+}
+
+// bindSQLArg converts JSON objects/arrays from the API into driver-friendly values.
+// database/sql rejects map[string]any and []any directly.
+func bindSQLArg(colType string, val any) (any, error) {
+	if val == nil {
+		return nil, nil
+	}
+	switch v := val.(type) {
+	case json.RawMessage:
+		return v, nil
+	case []byte:
+		return v, nil
+	case map[string]any:
+		return marshalJSONArg(v)
+	case []any:
+		if normalize.IsArray(colType) {
+			return bindArrayArg(v)
+		}
+		return marshalJSONArg(v)
+	default:
+		rv := reflect.ValueOf(val)
+		switch rv.Kind() {
+		case reflect.Map:
+			return marshalJSONArg(val)
+		case reflect.Slice:
+			if rv.Type().Elem().Kind() == reflect.Uint8 {
+				return val, nil
+			}
+			items := make([]any, rv.Len())
+			for i := 0; i < rv.Len(); i++ {
+				items[i] = rv.Index(i).Interface()
+			}
+			if normalize.IsArray(colType) {
+				return bindArrayArg(items)
+			}
+			return marshalJSONArg(items)
+		default:
+			return val, nil
+		}
+	}
+}
+
+func marshalJSONArg(v any) (any, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("encode JSON: %w", err)
+	}
+	return json.RawMessage(b), nil
+}
+
+// bindArrayArg prefers typed slices pgx accepts; otherwise uses a Postgres array literal.
+func bindArrayArg(items []any) (any, error) {
+	if len(items) == 0 {
+		return []string{}, nil
+	}
+	strs := make([]string, len(items))
+	allStr := true
+	for i, x := range items {
+		if x == nil {
+			allStr = false
+			break
+		}
+		s, ok := x.(string)
+		if !ok {
+			allStr = false
+			break
+		}
+		strs[i] = s
+	}
+	if allStr {
+		return strs, nil
+	}
+	return formatPGArrayLiteral(items), nil
+}
+
+func formatPGArrayLiteral(items []any) string {
+	var b strings.Builder
+	b.WriteByte('{')
+	for i, x := range items {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		if x == nil {
+			b.WriteString("NULL")
+			continue
+		}
+		switch v := x.(type) {
+		case string:
+			b.WriteString(quotePGArrayElement(v))
+		case bool:
+			if v {
+				b.WriteString("t")
+			} else {
+				b.WriteString("f")
+			}
+		case float64:
+			b.WriteString(strconv.FormatFloat(v, 'g', -1, 64))
+		case json.Number:
+			b.WriteString(string(v))
+		case []any:
+			b.WriteString(formatPGArrayLiteral(v))
+		default:
+			b.WriteString(quotePGArrayElement(fmt.Sprint(v)))
+		}
+	}
+	b.WriteByte('}')
+	return b.String()
+}
+
+func quotePGArrayElement(s string) string {
+	if s == "" || strings.EqualFold(s, "null") || strings.ContainsAny(s, "{},\"\\\t\n\r ") {
+		var b strings.Builder
+		b.WriteByte('"')
+		for _, r := range s {
+			if r == '\\' || r == '"' {
+				b.WriteByte('\\')
+			}
+			b.WriteRune(r)
+		}
+		b.WriteByte('"')
+		return b.String()
+	}
+	return s
 }
 
 func mapKey(pk []string, key map[string]any) ([]string, []any, error) {

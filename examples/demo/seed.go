@@ -16,6 +16,7 @@ var postgresSeed = []string{
 	`DROP TABLE IF EXISTS order_items`,
 	`DROP TABLE IF EXISTS orders`,
 	`DROP TABLE IF EXISTS products`,
+	`DROP TABLE IF EXISTS sample_docs`,
 	`DROP TABLE IF EXISTS customers`,
 	`CREATE TABLE customers (
 		id BIGSERIAL PRIMARY KEY,
@@ -57,6 +58,15 @@ var postgresSeed = []string{
 		product_id BIGINT NOT NULL REFERENCES products(id),
 		quantity INTEGER NOT NULL CHECK (quantity > 0),
 		unit_price_cents INTEGER NOT NULL CHECK (unit_price_cents >= 0)
+	)`,
+	`CREATE TABLE sample_docs (
+		id BIGSERIAL PRIMARY KEY,
+		title TEXT NOT NULL,
+		body TEXT NOT NULL,
+		meta JSONB NOT NULL,
+		tags TEXT[] NOT NULL,
+		payload BYTEA NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
 	`CREATE INDEX orders_customer_id_idx ON orders (customer_id)`,
 	`CREATE INDEX order_items_order_id_idx ON order_items (order_id)`,
@@ -100,6 +110,28 @@ var postgresSeed = []string{
 		(1, 3, 1, 1800),
 		(2, 2, 1, 520),
 		(3, 1, 3, 450)`,
+	`INSERT INTO sample_docs (title, body, meta, tags, payload) VALUES
+		(
+			'Welcome guide',
+			repeat('DBAdminer demo paragraph. Long text for scrolling and truncation checks. ', 80),
+			'{"kind":"guide","version":1,"flags":{"published":true,"featured":false},"scores":[4.5,4.8]}'::jsonb,
+			ARRAY['docs', 'welcome', 'demo'],
+			decode('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082','hex')
+		),
+		(
+			'Release notes',
+			repeat(E'Line of release notes with enough content to exercise wide cells and copy.\n', 120),
+			'{"kind":"notes","version":2,"authors":["ada","linus"],"changelog":[{"id":1,"text":"JSON cells"},{"id":2,"text":"array chips"}]}'::jsonb,
+			ARRAY['release', 'notes'],
+			decode(repeat('deadbeef', 512), 'hex')
+		),
+		(
+			'Empty-ish payload',
+			'Short body with rich metadata and an empty tag list for edge cases.',
+			'{"kind":"edge","nested":{"a":{"b":[1,2,3]}},"empty":{}}'::jsonb,
+			ARRAY[]::text[],
+			decode('00', 'hex')
+		)`,
 	`CREATE OR REPLACE FUNCTION customer_label(p_id BIGINT)
 	RETURNS TEXT
 	LANGUAGE sql
@@ -129,6 +161,7 @@ var mysqlSeed = []string{
 	`DROP TABLE IF EXISTS order_items`,
 	`DROP TABLE IF EXISTS orders`,
 	`DROP TABLE IF EXISTS products`,
+	`DROP TABLE IF EXISTS sample_docs`,
 	`DROP TABLE IF EXISTS customers`,
 	`SET FOREIGN_KEY_CHECKS=1`,
 	`CREATE TABLE customers (
@@ -181,6 +214,15 @@ var mysqlSeed = []string{
 		CONSTRAINT order_items_product_id_fkey
 			FOREIGN KEY (product_id) REFERENCES products(id)
 	)`,
+	`CREATE TABLE sample_docs (
+		id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+		title VARCHAR(255) NOT NULL,
+		body MEDIUMTEXT NOT NULL,
+		meta JSON NOT NULL,
+		tags JSON NOT NULL,
+		payload BLOB NOT NULL,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
 	`CREATE INDEX orders_customer_id_idx ON orders (customer_id)`,
 	`CREATE INDEX order_items_order_id_idx ON order_items (order_id)`,
 	`CREATE VIEW customer_order_totals AS
@@ -229,6 +271,28 @@ var mysqlSeed = []string{
 		(1, 3, 1, 1800),
 		(2, 2, 1, 520),
 		(3, 1, 3, 450)`,
+	`INSERT INTO sample_docs (title, body, meta, tags, payload) VALUES
+		(
+			'Welcome guide',
+			REPEAT('DBAdminer demo paragraph. Long text for scrolling and truncation checks. ', 80),
+			CAST('{"kind":"guide","version":1,"flags":{"published":true,"featured":false},"scores":[4.5,4.8]}' AS JSON),
+			JSON_ARRAY('docs', 'welcome', 'demo'),
+			UNHEX('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082')
+		),
+		(
+			'Release notes',
+			REPEAT(CONCAT('Line of release notes with enough content to exercise wide cells and copy.', CHAR(10)), 120),
+			CAST('{"kind":"notes","version":2,"authors":["ada","linus"],"changelog":[{"id":1,"text":"JSON cells"},{"id":2,"text":"array chips"}]}' AS JSON),
+			JSON_ARRAY('release', 'notes'),
+			UNHEX(REPEAT('deadbeef', 512))
+		),
+		(
+			'Empty-ish payload',
+			'Short body with rich metadata and an empty tag list for edge cases.',
+			CAST('{"kind":"edge","nested":{"a":{"b":[1,2,3]}},"empty":{}}' AS JSON),
+			JSON_ARRAY(),
+			UNHEX('00')
+		)`,
 	`CREATE FUNCTION customer_label(p_id BIGINT)
 	RETURNS VARCHAR(512)
 	DETERMINISTIC

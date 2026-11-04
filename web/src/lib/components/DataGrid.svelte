@@ -3,15 +3,26 @@
     ArrowDown,
     ArrowUp,
     Braces,
+    Brackets,
     ChevronsUpDown,
     Copy,
+    Download,
+    Maximize2,
     Pin,
     PinOff,
   } from "@lucide/svelte";
   import { tableKey } from "$lib/api";
   import { Button } from "$lib/components/ui/button";
   import * as Popover from "$lib/components/ui/popover";
-  import { cellKind, cellPretty, cellText, formatCount } from "$lib/format";
+  import {
+    blobSummary,
+    cellKind,
+    cellPretty,
+    cellSummary,
+    cellText,
+    formatCount,
+  } from "$lib/format";
+  import { downloadBase64Blob } from "$lib/export";
   import {
     editInputText,
     parseCellInput,
@@ -24,7 +35,21 @@
 
   const PIN_PK_KEY = "dbadminer:pin-pk";
   const CHECKBOX_W = 32;
-  const PINNED_PK_W = 120;
+  /** Mono 12px ≈ 7.25px/char; clamps keep short ids tight and UUIDs from dominating. */
+  const PINNED_CHAR_W = 7.25;
+  const PINNED_PK_MIN_W = 52;
+  const PINNED_PK_MAX_W = 300;
+  /** Sort + pin icons + header `px-3` beyond the column name. */
+  const PINNED_HEADER_CHROME = 48;
+  /** Body cell `px-3` horizontal padding. */
+  const PINNED_CELL_PAD = 24;
+
+  function estimatePinnedPkWidth(headerLen: number, maxCellLen: number): number {
+    const headerW = headerLen * PINNED_CHAR_W + PINNED_HEADER_CHROME;
+    const cellW = maxCellLen * PINNED_CHAR_W + PINNED_CELL_PAD;
+    const raw = Math.max(headerW, cellW);
+    return Math.round(Math.min(PINNED_PK_MAX_W, Math.max(PINNED_PK_MIN_W, raw)));
+  }
 
   function loadPinPk(): boolean {
     try {
@@ -53,6 +78,12 @@
   const canWriteRows = $derived(
     !app.readOnly && !!app.selected && !isView && pk.length > 0,
   );
+  /** Column name → SQL type (for blob detection, etc.). */
+  const columnTypes = $derived.by(() => {
+    const map: Record<string, string> = {};
+    for (const c of detail?.columns ?? []) map[c.name] = c.type;
+    return map;
+  });
 
   let pinPk = $state(loadPinPk());
   const pinPkEnabled = $derived(pinPk && pk.length > 0);
@@ -78,6 +109,34 @@
     });
   });
 
+  /** Content-based widths for each pinned PK column (current page + header). */
+  const pinnedPkWidths = $derived.by((): number[] => {
+    if (!pinPkEnabled) return [];
+    const cols = data?.columns ?? [];
+    const pinned = pk.filter((name) => cols.includes(name));
+    return pinned.map((name) => {
+      const colIndex = cols.indexOf(name);
+      let maxCellLen = 0;
+      for (const row of displayRows) {
+        const len = cellText(row.values[colIndex]).length;
+        if (len > maxCellLen) maxCellLen = len;
+      }
+      return estimatePinnedPkWidth(name.length, maxCellLen);
+    });
+  });
+
+  /** Sticky `left` offsets: checkbox (optional) + cumulative prior pinned widths. */
+  const pinnedPkOffsets = $derived.by((): number[] => {
+    const base = canWriteRows ? CHECKBOX_W : 0;
+    const offsets: number[] = [];
+    let left = base;
+    for (const w of pinnedPkWidths) {
+      offsets.push(left);
+      left += w;
+    }
+    return offsets;
+  });
+
   /** Rows eligible for bulk selection (pending deletes are locked out). */
   const selectableRows = $derived(displayRows.filter((r) => !r.deleted));
   const selectableIds = $derived(selectableRows.map((r) => r.rowId));
@@ -91,6 +150,10 @@
 
   let editing = $state<{ rowId: string; column: string } | null>(null);
   let editText = $state("");
+  /** True when editing a JSON object or array (strict JSON.parse on commit). */
+  let editStructured = $state(false);
+  /** True for textarea editor (text / JSON / blob); numbers & booleans stay single-line. */
+  let editMultiline = $state(false);
 
   let bulkOpen = $state(false);
   let bulkColumn = $state("");
@@ -108,9 +171,10 @@
     }
   }
 
-  function pinnedLeft(pinIndex: number): string {
-    const base = canWriteRows ? CHECKBOX_W : 0;
-    return `${base + pinIndex * PINNED_PK_W}px`;
+  function pinnedStyle(pinIndex: number): string {
+    const w = pinnedPkWidths[pinIndex] ?? PINNED_PK_MIN_W;
+    const left = pinnedPkOffsets[pinIndex] ?? (canWriteRows ? CHECKBOX_W : 0);
+    return `left: ${left}px; width: ${w}px; min-width: ${w}px;`;
   }
 
   function copyCell(value: unknown, event?: MouseEvent) {
@@ -122,19 +186,47 @@
     void app.copy(cellText(value), "Copied cell");
   }
 
+  function downloadBlobCell(value: unknown, column: string, event?: MouseEvent) {
+    event?.stopPropagation();
+    if (typeof value !== "string" || value.length === 0) {
+      app.toast("error", "Nothing to download");
+      return;
+    }
+    try {
+      downloadBase64Blob(value, `${basename}-${column}.bin`);
+      app.toast("success", "Download started");
+    } catch {
+      app.toast("error", "Could not decode blob");
+    }
+  }
+
   function align(value: unknown): string {
     // Keep numbers left-aligned with headers; tabular-nums still lines digits up.
     if (cellKind(value) === "number") return "text-left tabular-nums";
     return "text-left";
   }
 
+  /** Opaque sticky backgrounds so scrolled cells never show through. */
+  function stickyCellBg(row: DisplayRow, edited = false): string {
+    if (edited) {
+      return "bg-[color-mix(in_oklch,var(--color-amber-500)_18%,var(--color-surface))] group-hover:bg-[color-mix(in_oklch,var(--color-amber-500)_22%,var(--color-surface-2))]";
+    }
+    if (row.source === "insert") {
+      return "bg-[color-mix(in_oklch,var(--color-emerald-500)_12%,var(--color-surface))] group-hover:bg-[color-mix(in_oklch,var(--color-emerald-500)_16%,var(--color-surface-2))]";
+    }
+    return "bg-surface group-hover:bg-surface-2";
+  }
+
   function startEdit(row: DisplayRow, column: string, value: unknown) {
     if (!canWriteRows || row.deleted) return;
+    const kind = cellKind(value, columnTypes[column]);
     editing = { rowId: row.rowId, column };
+    editStructured = kind === "json" || kind === "array";
+    editMultiline = kind !== "number" && kind !== "boolean";
     editText = editInputText(value);
   }
 
-  function focusEditInput(node: HTMLInputElement) {
+  function focusEditInput(node: HTMLInputElement | HTMLTextAreaElement) {
     node.focus();
     node.select();
   }
@@ -142,6 +234,8 @@
   function cancelEdit() {
     editing = null;
     editText = "";
+    editStructured = false;
+    editMultiline = false;
   }
 
   function commitEdit(asNull = false) {
@@ -151,6 +245,13 @@
     let to: unknown;
     if (asNull) {
       to = null;
+    } else if (editStructured) {
+      try {
+        to = JSON.parse(editText);
+      } catch {
+        app.toast("error", "Invalid JSON");
+        return;
+      }
     } else if (editText === "" && from === null) {
       to = null;
     } else {
@@ -162,6 +263,8 @@
 
   function onEditKeydown(event: KeyboardEvent) {
     if (event.key === "Enter") {
+      // Textarea: Enter inserts a newline; Ctrl/Cmd+Enter commits.
+      if (editMultiline && !(event.ctrlKey || event.metaKey)) return;
       event.preventDefault();
       commitEdit();
     } else if (event.key === "Escape") {
@@ -240,28 +343,55 @@
   }
 </script>
 
-{#snippet cell(value: unknown, auto = false)}
-  {@const kind = cellKind(value)}
+{#snippet cell(value: unknown, auto = false, column = "", columnType = "")}
+  {@const kind = cellKind(value, columnType)}
   <span class="group/cell inline-flex max-w-full items-start gap-1">
     <span class="min-w-0 flex-1">
       {#if auto || value === undefined}
         <span class="text-muted-foreground italic">(auto)</span>
       {:else if kind === "null"}
         <span class="text-muted-foreground italic">NULL</span>
-      {:else if kind === "json"}
-        <span class="inline-flex max-w-80 items-start gap-1">
-          <span class="truncate font-mono text-[12px]">{cellText(value)}</span>
+      {:else if kind === "blob"}
+        <span class="inline-flex items-center gap-1">
+          <span
+            class="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+            title="Binary value (base64 in API)"
+          >
+            {blobSummary(String(value))}
+          </span>
+          <button
+            type="button"
+            class="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+            aria-label="Download blob"
+            title="Download"
+            onclick={(event) => downloadBlobCell(value, column || "blob", event)}
+          >
+            <Download class="size-3.5" />
+          </button>
+        </span>
+      {:else if kind === "json" || kind === "array"}
+        <span class="inline-flex max-w-80 items-center gap-1">
+          <span
+            class="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+            title={cellText(value)}
+          >
+            {cellSummary(value)}
+          </span>
           <Popover.Root>
             <Popover.Trigger>
               {#snippet child({ props })}
                 <button
                   {...props}
                   type="button"
-                  aria-label="Expand value"
-                  class="mt-0.5 shrink-0 cursor-pointer rounded text-muted-foreground hover:text-foreground"
+                  aria-label={kind === "array" ? "Expand array" : "Expand JSON"}
+                  class="shrink-0 cursor-pointer rounded text-muted-foreground hover:text-foreground"
                   onclick={(event) => event.stopPropagation()}
                 >
-                  <Braces class="size-3.5" />
+                  {#if kind === "array"}
+                    <Brackets class="size-3.5" />
+                  {:else}
+                    <Braces class="size-3.5" />
+                  {/if}
                 </button>
               {/snippet}
             </Popover.Trigger>
@@ -273,10 +403,39 @@
       {:else if kind === "boolean"}
         <span class="font-mono text-primary">{cellText(value)}</span>
       {:else}
-        <span class={cn("break-all", kind === "number" && "font-mono")}>{cellText(value)}</span>
+        {@const text = cellText(value)}
+        {@const long = kind === "text" && text.length > 64}
+        <span class="inline-flex max-w-full items-center gap-1">
+          <span
+            class={cn("min-w-0 truncate", kind === "number" && "font-mono", long && "max-w-72")}
+            title={text}
+          >
+            {text}
+          </span>
+          {#if long}
+            <Popover.Root>
+              <Popover.Trigger>
+                {#snippet child({ props })}
+                  <button
+                    {...props}
+                    type="button"
+                    aria-label="Expand text"
+                    class="shrink-0 cursor-pointer rounded text-muted-foreground hover:text-foreground"
+                    onclick={(event) => event.stopPropagation()}
+                  >
+                    <Maximize2 class="size-3.5" />
+                  </button>
+                {/snippet}
+              </Popover.Trigger>
+              <Popover.Content class="w-96 max-w-[80vw] p-0" align="start">
+                <pre class="max-h-80 overflow-auto p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap">{text}</pre>
+              </Popover.Content>
+            </Popover.Root>
+          {/if}
+        </span>
       {/if}
     </span>
-    {#if !auto && value !== undefined}
+    {#if !auto && value !== undefined && kind !== "blob"}
       <button
         type="button"
         class="mt-0.5 shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-surface-2 hover:text-foreground group-hover/cell:opacity-100 focus-visible:opacity-100"
@@ -414,7 +573,7 @@
       </p>
     {/if}
     <div class={cn("min-h-0 flex-1 overflow-auto", app.grid.loading && "opacity-60")}>
-      <table class="w-max min-w-full border-separate border-spacing-0 font-mono text-[12px]">
+      <table class="w-max border-separate border-spacing-0 font-mono text-[12px]">
         <thead>
           <tr>
             {#if canWriteRows}
@@ -440,10 +599,12 @@
             {#each visibleColumns as col (col.name)}
               <th
                 class={cn(
-                  "sticky top-0 border-b border-border bg-surface px-2 py-1 text-left font-medium",
-                  col.pinned ? "z-30 border-r shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]" : "z-10",
+                  "sticky top-0 border-b border-border bg-surface px-3 py-1 text-left font-medium",
+                  col.pinned
+                    ? "z-30 border-r whitespace-nowrap shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]"
+                    : "z-10",
                 )}
-                style={col.pinned ? `left: ${pinnedLeft(col.pinIndex)}; min-width: ${PINNED_PK_W}px;` : undefined}
+                style={col.pinned ? pinnedStyle(col.pinIndex) : undefined}
               >
                 <button
                   type="button"
@@ -486,22 +647,18 @@
           {/if}
           {#each displayRows as row (row.rowId)}
             {@const isEditingRow = editing?.rowId === row.rowId}
-            {@const stickyBg = cn(
-              "bg-surface group-hover:bg-surface-2",
-              row.source === "insert" && "bg-emerald-500/10 group-hover:bg-emerald-500/15",
-            )}
             <tr
               class={cn(
                 "group hover:bg-surface-2/70",
                 row.source === "insert" && "bg-emerald-500/10",
-                row.deleted && "text-muted-foreground line-through opacity-70",
+                row.deleted && "text-muted-foreground line-through",
               )}
             >
               {#if canWriteRows}
                 <td
                   class={cn(
                     "relative sticky left-0 z-20 border-b border-r border-border px-1.5 py-1 text-center align-middle shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]",
-                    stickyBg,
+                    stickyCellBg(row),
                   )}
                 >
                   <input
@@ -537,27 +694,45 @@
                 {@const isEditing = isEditingRow && editing?.column === col.name}
                 <td
                   class={cn(
-                    "relative max-w-96 border-b border-border px-2 py-1 align-top",
+                    "relative border-b border-border px-3 py-1 align-top",
+                    col.pinned
+                      ? "sticky z-20 border-r shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]"
+                      : undefined,
+                    col.pinned && !isEditing && "whitespace-nowrap",
+                    !col.pinned && !isEditing && "max-w-96 overflow-hidden",
+                    isEditing && "overflow-visible",
                     align(value),
-                    opIndex != null && "bg-amber-500/15",
+                    !col.pinned && opIndex != null && "bg-amber-500/15",
                     !isEditing && !row.deleted && canWriteRows && "cursor-cell",
-                    col.pinned && "sticky z-20 border-r shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]",
-                    col.pinned && stickyBg,
+                    col.pinned && stickyCellBg(row, opIndex != null),
                   )}
-                  style={col.pinned ? `left: ${pinnedLeft(col.pinIndex)}; min-width: ${PINNED_PK_W}px;` : undefined}
+                  style={col.pinned ? pinnedStyle(col.pinIndex) : undefined}
                   title={isEditing ? undefined : canWriteRows && !row.deleted ? "Double-click to edit" : undefined}
                   ondblclick={() => startEdit(row, col.name, value)}
                 >
                   {#if isEditing}
-                    <div class="flex min-w-40 items-center gap-1">
-                      <input
-                        {@attach focusEditInput}
-                        class="h-7 min-w-0 flex-1 rounded border border-border bg-background px-1.5 font-mono text-[12px] outline-none focus-visible:border-ring"
-                        bind:value={editText}
-                        onkeydown={onEditKeydown}
-                        onblur={() => commitEdit()}
-                        onclick={(e) => e.stopPropagation()}
-                      />
+                    <div class="flex min-w-40 items-start gap-1">
+                      {#if editMultiline}
+                        <textarea
+                          {@attach focusEditInput}
+                          rows={editStructured ? 5 : 4}
+                          class="min-h-24 min-w-72 flex-1 resize rounded border border-border bg-background px-1.5 py-1 font-mono text-[12px] leading-relaxed outline-none focus-visible:border-ring"
+                          bind:value={editText}
+                          onkeydown={onEditKeydown}
+                          onblur={() => commitEdit()}
+                          onclick={(e) => e.stopPropagation()}
+                          title="Ctrl/Cmd+Enter to save"
+                        ></textarea>
+                      {:else}
+                        <input
+                          {@attach focusEditInput}
+                          class="h-7 min-w-0 flex-1 rounded border border-border bg-background px-1.5 font-mono text-[12px] outline-none focus-visible:border-ring"
+                          bind:value={editText}
+                          onkeydown={onEditKeydown}
+                          onblur={() => commitEdit()}
+                          onclick={(e) => e.stopPropagation()}
+                        />
+                      {/if}
                       <button
                         type="button"
                         class="h-7 shrink-0 cursor-pointer rounded border border-border px-1.5 text-[10px] font-sans font-semibold text-muted-foreground hover:bg-surface-2 hover:text-foreground"
@@ -572,7 +747,12 @@
                       </button>
                     </div>
                   {:else}
-                    {@render cell(value, row.source === "insert" && value === undefined)}
+                    {@render cell(
+                      value,
+                      row.source === "insert" && value === undefined,
+                      col.name,
+                      columnTypes[col.name] ?? "",
+                    )}
                   {/if}
                   {#if opIndex != null && !isEditing}
                     <span
@@ -588,7 +768,7 @@
                 <td
                   class={cn(
                     "sticky right-0 z-20 border-b border-l border-border px-2 py-1 text-right font-sans whitespace-nowrap shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.12)]",
-                    stickyBg,
+                    stickyCellBg(row),
                   )}
                 >
                   {#if !row.deleted}

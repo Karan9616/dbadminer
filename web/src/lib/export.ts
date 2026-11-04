@@ -17,8 +17,12 @@ export function toJSON(data: ResultSet): string {
   return JSON.stringify(objects, null, 2) + "\n";
 }
 
-export function download(filename: string, content: string, type: string): void {
-  const url = URL.createObjectURL(new Blob([content], { type }));
+export function download(filename: string, content: string | Blob | ArrayBuffer | Uint8Array, type: string): void {
+  const blob =
+    content instanceof Blob
+      ? content
+      : new Blob([content as BlobPart], { type });
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
@@ -26,6 +30,16 @@ export function download(filename: string, content: string, type: string): void 
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Download a binary cell stored as base64 (API form for BYTEA/BLOB). */
+export function downloadBase64Blob(base64: string, filename: string): void {
+  const clean = base64.replace(/\s+/g, "");
+  const bin = atob(clean);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const safe = filename.replace(/[^\w.-]+/g, "_") || "blob";
+  download(safe, bytes, "application/octet-stream");
 }
 
 export function exportResult(data: ResultSet, basename: string, format: "csv" | "json"): void {
